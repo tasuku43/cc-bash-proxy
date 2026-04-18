@@ -1,6 +1,6 @@
 ---
 title: "cmdguard eval"
-status: proposed
+status: implemented
 date: 2026-04-18
 ---
 

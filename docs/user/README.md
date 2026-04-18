@@ -1,6 +1,6 @@
 ---
 title: "User Documentation"
-status: proposed
+status: implemented
 date: 2026-04-18
 ---
 

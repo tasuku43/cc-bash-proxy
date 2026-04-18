@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -78,11 +79,10 @@ func Run(loaded rule.Loaded, home string) Report {
 		checks = append(checks, Check{ID: "rules.shadowing", Category: "diagnostics", Status: StatusPass, Message: "no obvious shadowing detected"})
 	}
 
-	binaryPath := os.Getenv("PATH")
-	if binaryPath != "" {
-		checks = append(checks, Check{ID: "install.binary-on-path", Category: "install", Status: StatusPass, Message: "PATH is configured"})
+	if path, err := exec.LookPath("cmdguard"); err == nil {
+		checks = append(checks, Check{ID: "install.binary-on-path", Category: "install", Status: StatusPass, Message: "cmdguard found on PATH at " + path})
 	} else {
-		checks = append(checks, Check{ID: "install.binary-on-path", Category: "install", Status: StatusWarn, Message: "PATH is empty"})
+		checks = append(checks, Check{ID: "install.binary-on-path", Category: "install", Status: StatusWarn, Message: "cmdguard not found on PATH"})
 	}
 
 	claudeSettings := filepath.Join(home, ".claude", "settings.json")

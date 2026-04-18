@@ -1,6 +1,6 @@
 ---
 title: "Product Concept: Declarative Command Policy Guard"
-status: proposed
+status: implemented
 date: 2026-04-18
 ---
 

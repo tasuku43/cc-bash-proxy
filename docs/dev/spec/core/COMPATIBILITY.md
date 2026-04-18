@@ -1,6 +1,6 @@
 ---
 title: "Compatibility and Distribution"
-status: proposed
+status: implemented
 date: 2026-04-18
 ---
 

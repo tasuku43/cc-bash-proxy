@@ -2,8 +2,8 @@
 
 Declarative, testable command-string policy engine for AI agents and shells.
 
-> **Status:** design phase. See [`docs/dev/spec/README.md`](docs/dev/spec/README.md)
-> for the v1.0 implementation contracts and
+> **Status:** v1 core implementation in progress. See
+> [`docs/dev/spec/README.md`](docs/dev/spec/README.md) for the v1.0 implementation contracts and
 > [`docs/concepts/product-concept.md`](docs/concepts/product-concept.md) for the
 > product concept.
 

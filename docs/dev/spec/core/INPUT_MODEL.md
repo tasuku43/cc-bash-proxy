@@ -1,6 +1,6 @@
 ---
 title: "Input Model"
-status: proposed
+status: implemented
 date: 2026-04-18
 ---
 
