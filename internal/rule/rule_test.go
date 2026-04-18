@@ -48,3 +48,33 @@ rules:
 		t.Fatalf("first rule = %s", loaded.Rules[0].ID)
 	}
 }
+
+func TestLoadFileForEvalIfPresentSkipsExamplesButValidates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cmdguard.yml")
+	body := `version: 1
+rules:
+  - id: user-rule
+    pattern: "^git"
+    message: "use a safer alternative instead"
+    block_examples:
+      - "git status"
+      - "git log"
+    allow_examples:
+      - "echo ok"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rules, err := LoadFileForEvalIfPresent(Source{Layer: LayerUser, Path: path})
+	if err != nil {
+		t.Fatalf("LoadFileForEvalIfPresent() error = %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("got %d rules", len(rules))
+	}
+	if len(rules[0].BlockExamples) != 0 || len(rules[0].AllowExamples) != 0 {
+		t.Fatalf("examples should not be loaded: %+v", rules[0])
+	}
+}

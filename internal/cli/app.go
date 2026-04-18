@@ -188,7 +188,7 @@ func runInit(args []string, streams Streams, env Env) int {
 }
 
 func evaluateRequest(req input.ExecRequest, format string, streams Streams, env Env) int {
-	loaded := rule.LoadEffective(env.Cwd, env.Home, env.XDGConfigHome)
+	loaded := rule.LoadEffectiveForEval(env.Home, env.XDGConfigHome)
 	if len(loaded.Errors) > 0 {
 		return emitError(streams, format, "invalid_config", strings.Join(rule.ErrorStrings(loaded.Errors), "; "))
 	}
