@@ -13,7 +13,7 @@ const fullUserConfig = `version: 1
 rules:
   - id: no-git-dash-c
     pattern: '^\s*git\s+-C\b'
-    message: "git -C は禁止。cd で移動してから実行してください。"
+    message: "git -C is blocked. Change into the target directory and rerun the command."
     block_examples:
       - "git -C repos/foo status"
       - "  git -C . log"
@@ -22,7 +22,7 @@ rules:
       - "# git -C in comment"
   - id: no-git-diff-three-dot
     pattern: '^\s*git\s+diff\s+.*\.\.\.'
-    message: "git diff <base>...<head> はコスト効率が悪い（master との乖離が大きいと出力が膨大になる）。PR差分の確認には gh pr diff を使ってください。"
+    message: "git diff <base>...<head> is blocked because it can produce very large output. Use gh pr diff instead."
     block_examples:
       - "git diff main...HEAD"
       - "git diff origin/main...feature"
@@ -31,7 +31,7 @@ rules:
       - "gh pr diff"
   - id: no-shell-dash-c
     pattern: '^\s*((env|command|exec)\s+)?((/[^[:space:]]+/)?(bash|sh|zsh|dash|ksh))\s+-c\b|^\s*/usr/bin/env\s+(bash|sh|zsh|dash|ksh)\s+-c\b'
-    message: "shell -c はコマンド連結ガードの抜け道になるため禁止。cd は単独実行し、その後コマンドを実行してください。"
+    message: "shell -c is blocked because it can bypass command chaining guards. Run cd separately, then run the next command."
     block_examples:
       - "bash -c 'git status && git diff'"
       - "sh -c 'echo hi'"
@@ -50,7 +50,7 @@ rules:
       - "env bash script.sh"
   - id: no-aws-profile-flag
     pattern: '(^|[^A-Za-z0-9_-])aws\s+[^|;&]*--profile[ =]'
-    message: "aws --profile は禁止。AWS_PROFILE=<profile> aws ... の形で実行してください（例: AWS_PROFILE=read-only-profile aws s3 ls）。"
+    message: "aws --profile is blocked. Use AWS_PROFILE=<profile> aws ... instead, for example AWS_PROFILE=read-only-profile aws s3 ls."
     block_examples:
       - "aws s3 ls --profile read-only-profile"
       - "aws --profile read-only-profile s3 ls"
@@ -59,7 +59,7 @@ rules:
       - "echo docs mention profile flag"
   - id: require-aws-profile-env
     pattern: '^\s*aws\s'
-    message: "aws は先頭で AWS_PROFILE=<profile> を指定してください（例: AWS_PROFILE=read-only-profile aws s3 ls）。"
+    message: "aws commands must start with AWS_PROFILE=<profile>, for example AWS_PROFILE=read-only-profile aws s3 ls."
     block_examples:
       - "aws s3 ls"
       - "  aws sts get-caller-identity"
@@ -68,7 +68,7 @@ rules:
       - "AWS_PROFILE=dev-profile aws sts get-caller-identity"
   - id: no-cd-one-liner
     pattern: '^\s*cd\s+[^&;|]+\s*(&&|;|\|)'
-    message: "cd で始まるワンライナー（cd path && command 等）は禁止。permission が先頭マッチのため allow/ask ルールをすり抜けてしまう。cd は単独実行し、その後に次のコマンドを実行してください。"
+    message: "One-liners that start with cd are blocked because prefix-based permission rules can miss the chained command. Run cd separately, then run the next command."
     block_examples:
       - "cd repo && git status"
       - "cd repo; make test"
@@ -78,7 +78,7 @@ rules:
       - "git status"
   - id: no-git-git-dir
     pattern: '^\s*git\s+--git-dir\b'
-    message: "git --git-dir は禁止。cd で移動してから実行してください。"
+    message: "git --git-dir is blocked. Change into the target directory and rerun the command."
     block_examples:
       - "git --git-dir=.git status"
       - "git --git-dir ../repo/.git log"
@@ -93,7 +93,7 @@ func TestRunEvalJSONDeny(t *testing.T) {
 rules:
   - id: no-git-dash-c
     pattern: '^\s*git\s+-C\b'
-    message: "git -C は禁止。cd で移動してから実行してください。"
+    message: "git -C is blocked. Change into the target directory and rerun the command."
     block_examples: ["git -C foo status"]
     allow_examples: ["git status"]
 `)
@@ -123,7 +123,7 @@ func TestRunCheckAllow(t *testing.T) {
 rules:
   - id: no-git-dash-c
     pattern: '^\s*git\s+-C\b'
-    message: "git -C は禁止。cd で移動してから実行してください。"
+    message: "git -C is blocked. Change into the target directory and rerun the command."
     block_examples: ["git -C foo status"]
     allow_examples: ["git status"]
 `)
@@ -148,7 +148,7 @@ func TestRunTest(t *testing.T) {
 rules:
   - id: no-git-dash-c
     pattern: '^\s*git\s+-C\b'
-    message: "git -C は禁止。cd で移動してから実行してください。"
+    message: "git -C is blocked. Change into the target directory and rerun the command."
     block_examples: ["git -C foo status"]
     allow_examples: ["git status"]
 `)

@@ -23,7 +23,7 @@ version: 1
 rules:
   - id: no-git-dash-c
     pattern: '^\s*git\s+-C\b'
-    message: "git -C は禁止。cd で移動してから実行してください。"
+    message: "git -C is blocked. Change into the target directory and rerun the command."
     block_examples:
       - "git -C repos/foo status"
     allow_examples:

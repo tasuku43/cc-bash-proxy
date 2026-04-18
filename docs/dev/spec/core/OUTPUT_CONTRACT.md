@@ -60,7 +60,7 @@ that adds useful context, but `rule_id` and `message` are the minimum contract.
 {
   "decision": "deny",
   "rule_id": "no-git-dash-c",
-  "message": "git -C は禁止。cd で移動してから実行してください。",
+  "message": "git -C is blocked. Change into the target directory and rerun the command.",
   "command": "git -C repos/foo status",
   "source": {
     "layer": "user",
