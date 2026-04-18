@@ -15,8 +15,8 @@ existing user configuration in unsafe ways.
 
 `cmdguard init` may:
 
-- create a starter `.cmdguard.yml` when one does not exist
-- explain where user-wide config lives
+- create a starter user-wide config when one does not exist
+- explain where the user-wide config lives
 - detect compatible Claude Code settings files
 - print the hook snippet needed to register `cmdguard eval`
 
@@ -24,7 +24,7 @@ existing user configuration in unsafe ways.
 
 v1 `init` should optimize for idempotence and non-destructive setup.
 
-- If `.cmdguard.yml` already exists, do not overwrite it
+- If the user-wide config already exists, do not overwrite it
 - If Claude Code hook registration already exists or settings are non-trivial,
   prefer reporting status and proposed changes over blind mutation
 - If automatic mutation is supported, it should be conservative and explicit

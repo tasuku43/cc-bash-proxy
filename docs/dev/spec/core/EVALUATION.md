@@ -37,38 +37,32 @@ features are post-v1 work.
 If input does not conform to one of these shapes, evaluation fails with an
 error. v1 does not silently allow unknown action types.
 
-## 4. Configuration Layers
+## 4. Configuration Source
 
-v1 evaluates rules from two optional layers:
+v1 evaluates rules from a single user-wide configuration file:
 
-1. Project-local: `.cmdguard.yml` in the repository root or current working
-   directory context
-2. User-wide: `$XDG_CONFIG_HOME/cmdguard/cmdguard.yml`, or
-   `~/.config/cmdguard/cmdguard.yml` by default
+- `$XDG_CONFIG_HOME/cmdguard/cmdguard.yml`
+- `~/.config/cmdguard/cmdguard.yml` when `XDG_CONFIG_HOME` is not set
 
-Project-local rules are evaluated before user-wide rules because project policy
-should be able to deny commands even when the user has unrelated personal
-rules.
+Within that file, source order is preserved.
 
 ## 5. Evaluation Order
 
 The evaluation order is fixed and deterministic.
 
-1. Load the project-local file if present
-2. Load the user-wide file if present
-3. Within each file, preserve source order
-4. Evaluate rules in that merged order
-5. Select the first matching rule
+1. Load the user-wide config file if present
+2. Preserve rule source order
+3. Evaluate rules in that order
+4. Select the first matching rule
 
 The first matching rule is the decision rule. Later matching rules are ignored
 for the purpose of the runtime deny decision.
 
 ## 6. Rule Identity
 
-Rule IDs must be globally unique across all loaded layers.
+Rule IDs must be unique within the effective configuration file.
 
 - Duplicate IDs within a file are errors
-- Duplicate IDs across layers are errors
 
 v1 does not define override semantics through repeated IDs.
 

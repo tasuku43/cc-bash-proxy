@@ -63,8 +63,8 @@ that adds useful context, but `rule_id` and `message` are the minimum contract.
   "message": "git -C は禁止。cd で移動してから実行してください。",
   "command": "git -C repos/foo status",
   "source": {
-    "layer": "project",
-    "path": "/path/to/repo/.cmdguard.yml"
+    "layer": "user",
+    "path": "/home/alice/.config/cmdguard/cmdguard.yml"
   }
 }
 ```

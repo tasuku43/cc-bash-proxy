@@ -153,7 +153,12 @@ func runInit(args []string, streams Streams, env Env) int {
 		writeErr(streams.Stderr, "usage: cmdguard init")
 		return exitError
 	}
-	configPath := filepath.Join(env.Cwd, ".cmdguard.yml")
+	configDir := filepath.Join(userConfigBase(env.Home, env.XDGConfigHome), "cmdguard")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		writeErr(streams.Stderr, err.Error())
+		return exitError
+	}
+	configPath := filepath.Join(configDir, "cmdguard.yml")
 	created := false
 	if _, err := os.Stat(configPath); errors.Is(err, os.ErrNotExist) {
 		if err := os.WriteFile(configPath, []byte(starterConfig), 0o644); err != nil {
@@ -168,7 +173,7 @@ func runInit(args []string, streams Streams, env Env) int {
 	} else {
 		fmt.Fprintf(streams.Stdout, "exists %s\n", configPath)
 	}
-	fmt.Fprintf(streams.Stdout, "user config: %s\n", filepath.Join(userConfigBase(env.Home, env.XDGConfigHome), "cmdguard", "cmdguard.yml"))
+	fmt.Fprintf(streams.Stdout, "user config: %s\n", configPath)
 
 	claudeSettings := filepath.Join(env.Home, ".claude", "settings.json")
 	if _, err := os.Stat(claudeSettings); err == nil {

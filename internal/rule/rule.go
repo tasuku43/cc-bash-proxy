@@ -13,8 +13,7 @@ import (
 )
 
 const (
-	LayerProject = "project"
-	LayerUser    = "user"
+	LayerUser = "user"
 )
 
 type File struct {
@@ -54,25 +53,20 @@ func (e *ValidationError) Error() string {
 	return strings.Join(e.Issues, "; ")
 }
 
-func ConfigPaths(cwd string, home string, xdgConfigHome string) []Source {
-	paths := []Source{
-		{Layer: LayerProject, Path: filepath.Join(cwd, ".cmdguard.yml")},
-	}
-
+func ConfigPaths(home string, xdgConfigHome string) []Source {
 	userConfigBase := xdgConfigHome
 	if userConfigBase == "" {
 		userConfigBase = filepath.Join(home, ".config")
 	}
-	paths = append(paths, Source{
+	return []Source{{
 		Layer: LayerUser,
 		Path:  filepath.Join(userConfigBase, "cmdguard", "cmdguard.yml"),
-	})
-	return paths
+	}}
 }
 
 func LoadEffective(cwd string, home string, xdgConfigHome string) Loaded {
 	var loaded Loaded
-	for _, src := range ConfigPaths(cwd, home, xdgConfigHome) {
+	for _, src := range ConfigPaths(home, xdgConfigHome) {
 		rules, err := LoadFileIfPresent(src)
 		if err != nil {
 			loaded.Errors = append(loaded.Errors, err)

@@ -18,7 +18,7 @@ Rules are declared in YAML. Every rule ships with block/allow examples, and
 through a command it used to block fails CI, not production.
 
 ```yaml
-# .cmdguard.yml
+# ~/.config/cmdguard/cmdguard.yml
 version: 1
 rules:
   - id: no-git-dash-c

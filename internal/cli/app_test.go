@@ -10,8 +10,8 @@ import (
 )
 
 func TestRunEvalJSONDeny(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, `version: 1
+	home := t.TempDir()
+	writeUserConfig(t, home, `version: 1
 rules:
   - id: no-git-dash-c
     pattern: '^\s*git\s+-C\b'
@@ -25,7 +25,7 @@ rules:
 		Stdin:  strings.NewReader(`{"action":"exec","command":"git -C foo status"}`),
 		Stdout: &stdout,
 		Stderr: &stderr,
-	}, Env{Cwd: dir, Home: t.TempDir()})
+	}, Env{Cwd: t.TempDir(), Home: home})
 	if code != 2 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
@@ -40,8 +40,8 @@ rules:
 }
 
 func TestRunCheckAllow(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, `version: 1
+	home := t.TempDir()
+	writeUserConfig(t, home, `version: 1
 rules:
   - id: no-git-dash-c
     pattern: '^\s*git\s+-C\b'
@@ -55,7 +55,7 @@ rules:
 		Stdin:  strings.NewReader(""),
 		Stdout: &stdout,
 		Stderr: &stderr,
-	}, Env{Cwd: dir, Home: t.TempDir()})
+	}, Env{Cwd: t.TempDir(), Home: home})
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
@@ -65,8 +65,8 @@ rules:
 }
 
 func TestRunTest(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, `version: 1
+	home := t.TempDir()
+	writeUserConfig(t, home, `version: 1
 rules:
   - id: no-git-dash-c
     pattern: '^\s*git\s+-C\b'
@@ -80,7 +80,7 @@ rules:
 		Stdin:  strings.NewReader(""),
 		Stdout: &stdout,
 		Stderr: &stderr,
-	}, Env{Cwd: dir, Home: t.TempDir()})
+	}, Env{Cwd: t.TempDir(), Home: home})
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
@@ -101,7 +101,7 @@ func TestRunInitCreatesStarterConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	data, err := os.ReadFile(filepath.Join(dir, ".cmdguard.yml"))
+	data, err := os.ReadFile(filepath.Join(home, ".config", "cmdguard", "cmdguard.yml"))
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
@@ -110,9 +110,13 @@ func TestRunInitCreatesStarterConfig(t *testing.T) {
 	}
 }
 
-func writeConfig(t *testing.T, dir string, body string) {
+func writeUserConfig(t *testing.T, home string, body string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, ".cmdguard.yml"), []byte(body), 0o644); err != nil {
+	path := filepath.Join(home, ".config", "cmdguard", "cmdguard.yml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

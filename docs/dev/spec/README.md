@@ -38,7 +38,7 @@ features. The core CLI contract is:
   - `core/INPUT_MODEL.md`: supported stdin payloads and normalization rules
   - `core/RULE_SCHEMA.md`: YAML rule file schema and field validation
   - `core/CONFIG.md`: config locations, layer model, and invalid-state handling
-  - `core/EVALUATION.md`: rule model, layer precedence, and match selection
+  - `core/EVALUATION.md`: rule model, evaluation order, and match selection
   - `core/OUTPUT_CONTRACT.md`: exit codes and output payloads
 - Commands
   - `commands/add.md`: planned rule-authoring helper command
