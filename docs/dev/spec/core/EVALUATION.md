@@ -8,7 +8,7 @@ date: 2026-04-18
 
 ## 1. Scope
 
-This document defines how `cmdguard` v1 evaluates input against configured
+This document defines how `cmdproxy` v1 evaluates input against configured
 rules and selects a deny decision.
 
 ## 2. Rule Model
@@ -24,8 +24,8 @@ v1 uses a deny-only rule model.
 This keeps the runtime contract small and deterministic. More expressive policy
 features are post-v1 work.
 
-`cmdguard` keeps the caller contract simple: callers pass a raw command string.
-Inside `cmdguard`, predicate-based rules are evaluated against an internal
+`cmdproxy` keeps the caller contract simple: callers pass a raw command string.
+Inside `cmdproxy`, predicate-based rules are evaluated against an internal
 parsed representation of that command string.
 
 That internal parsing may unwrap a small set of common launcher-style wrappers
@@ -35,7 +35,7 @@ shell AST.
 
 ## 3. Supported Input
 
-`cmdguard eval` accepts only execution input.
+`cmdproxy eval` accepts only execution input.
 
 - Generic input:
   - `action` must be `"exec"`
@@ -51,8 +51,8 @@ error. v1 does not silently allow unknown action types.
 
 v1 evaluates rules from a single user-wide configuration file:
 
-- `$XDG_CONFIG_HOME/cmdguard/cmdguard.yml`
-- `~/.config/cmdguard/cmdguard.yml` when `XDG_CONFIG_HOME` is not set
+- `$XDG_CONFIG_HOME/cmdproxy/cmdproxy.yml`
+- `~/.config/cmdproxy/cmdproxy.yml` when `XDG_CONFIG_HOME` is not set
 
 Within that file, source order is preserved.
 

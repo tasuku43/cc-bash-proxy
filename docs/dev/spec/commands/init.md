@@ -1,24 +1,24 @@
 ---
-title: "cmdguard init"
+title: "cmdproxy init"
 status: implemented
 date: 2026-04-18
 ---
 
-# cmdguard init
+# cmdproxy init
 
 ## Purpose
 
-`cmdguard init` bootstraps a local `cmdguard` setup without silently modifying
+`cmdproxy init` bootstraps a local `cmdproxy` setup without silently modifying
 existing user configuration in unsafe ways.
 
 ## v1 Responsibilities
 
-`cmdguard init` may:
+`cmdproxy init` may:
 
 - create a starter user-wide config when one does not exist
 - explain where the user-wide config lives
 - detect compatible Claude Code settings files
-- print the hook snippet needed to register `cmdguard eval`
+- print the hook snippet needed to register `cmdproxy eval`
 
 ## Safety Principle
 
@@ -36,7 +36,7 @@ The starter config should:
 - use schema version `1`
 - include at least one sample deny rule
 - demonstrate both `block_examples` and `allow_examples`
-- be valid under `cmdguard test`
+- be valid under `cmdproxy test`
 
 ## Output
 

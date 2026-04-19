@@ -8,14 +8,14 @@ date: 2026-04-18
 
 ## 1. Scope
 
-This document defines where `cmdguard` looks for configuration in v1.
+This document defines where `cmdproxy` looks for configuration in v1.
 
 ## 2. Supported Locations
 
 v1 supports one primary configuration file:
 
-1. User-wide: `$XDG_CONFIG_HOME/cmdguard/cmdguard.yml`, or
-   `~/.config/cmdguard/cmdguard.yml` by default
+1. User-wide: `$XDG_CONFIG_HOME/cmdproxy/cmdproxy.yml`, or
+   `~/.config/cmdproxy/cmdproxy.yml` by default
 
 The file is optional. If it does not exist, evaluation proceeds with an empty
 rule set.
@@ -34,7 +34,7 @@ v1 does not provide an override mechanism based on matching IDs.
 - Invalid YAML: invalid configuration
 - Valid YAML with schema errors: invalid configuration
 
-Invalid configuration causes `cmdguard eval` to exit with error rather than
+Invalid configuration causes `cmdproxy eval` to exit with error rather than
 silently falling back to partial policy enforcement.
 
 ## 5. Future Extensions

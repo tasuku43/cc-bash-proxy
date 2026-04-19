@@ -8,7 +8,7 @@ date: 2026-04-18
 
 ## 1. Scope
 
-This document defines the v1 YAML schema for `cmdguard` rule files.
+This document defines the v1 YAML schema for `cmdproxy` rule files.
 
 ## 2. Top-Level Shape
 
@@ -72,7 +72,7 @@ Supported fields in v1:
 - `env_missing`: each listed environment variable must be absent from command
   prefixes
 
-The matcher is evaluated against `cmdguard`'s internal command parsing, not
+The matcher is evaluated against `cmdproxy`'s internal command parsing, not
 against the raw input string directly.
 
 ### `pattern`

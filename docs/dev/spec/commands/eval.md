@@ -1,20 +1,20 @@
 ---
-title: "cmdguard eval"
+title: "cmdproxy eval"
 status: implemented
 date: 2026-04-18
 ---
 
-# cmdguard eval
+# cmdproxy eval
 
 ## Purpose
 
-`cmdguard eval` is the hook entrypoint for v1. It reads stdin JSON describing
+`cmdproxy eval` is the hook entrypoint for v1. It reads stdin JSON describing
 an attempted command execution, evaluates loaded rules, and exits with the
 result.
 
 ## Input Sources
 
-`cmdguard eval` supports:
+`cmdproxy eval` supports:
 
 - Generic execution input defined in `../core/EVALUATION.md`
 - Claude Code `PreToolUse` Bash payloads adapted into the generic execution
@@ -24,7 +24,7 @@ Unsupported or malformed input is an error.
 
 ## Evaluation Behavior
 
-`cmdguard eval` must:
+`cmdproxy eval` must:
 
 1. Read stdin fully
 2. Parse input JSON

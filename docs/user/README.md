@@ -6,7 +6,7 @@ date: 2026-04-18
 
 # User Documentation
 
-Start here if your goal is to use `cmdguard` in local workflows.
+Start here if your goal is to use `cmdproxy` in local workflows.
 
 ## Entry
 

@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tasuku43/cmdguard/internal/doctor"
-	"github.com/tasuku43/cmdguard/internal/engine"
-	"github.com/tasuku43/cmdguard/internal/input"
-	"github.com/tasuku43/cmdguard/internal/rule"
+	"github.com/tasuku43/cmdproxy/internal/doctor"
+	"github.com/tasuku43/cmdproxy/internal/engine"
+	"github.com/tasuku43/cmdproxy/internal/input"
+	"github.com/tasuku43/cmdproxy/internal/rule"
 )
 
 const (
@@ -175,12 +175,12 @@ func runInit(args []string, streams Streams, env Env) int {
 		writeCommandHelp(streams.Stderr, "init")
 		return exitError
 	}
-	configDir := filepath.Join(userConfigBase(env.Home, env.XDGConfigHome), "cmdguard")
+	configDir := filepath.Join(userConfigBase(env.Home, env.XDGConfigHome), "cmdproxy")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		writeErr(streams.Stderr, err.Error())
 		return exitError
 	}
-	configPath := filepath.Join(configDir, "cmdguard.yml")
+	configPath := filepath.Join(configDir, "cmdproxy.yml")
 	created := false
 	if _, err := os.Stat(configPath); errors.Is(err, os.ErrNotExist) {
 		if err := os.WriteFile(configPath, []byte(starterConfig), 0o644); err != nil {
@@ -205,7 +205,7 @@ func runInit(args []string, streams Streams, env Env) int {
 	}
 
 	fmt.Fprintln(streams.Stdout, "hook snippet:")
-	fmt.Fprintln(streams.Stdout, `{"matcher":"Bash","hooks":[{"type":"command","command":"cmdguard eval"}]}`)
+	fmt.Fprintln(streams.Stdout, `{"matcher":"Bash","hooks":[{"type":"command","command":"cmdproxy eval"}]}`)
 	return exitAllow
 }
 
@@ -278,19 +278,19 @@ func parseCommonFlags(args []string) (string, []string, error) {
 }
 
 func writeUsage(w io.Writer) {
-	fmt.Fprint(w, `cmdguard
+	fmt.Fprint(w, `cmdproxy
 
 Declarative, testable command policy for AI-agent shell commands.
 
 Typical workflow:
-  1. Edit ~/.config/cmdguard/cmdguard.yml
+  1. Edit ~/.config/cmdproxy/cmdproxy.yml
   2. Add block_examples and allow_examples for every rule
-  3. Run cmdguard test
-  4. Use cmdguard check for spot checks
-  5. Let Claude Code call cmdguard eval from PreToolUse
+  3. Run cmdproxy test
+  4. Use cmdproxy check for spot checks
+  5. Let Claude Code call cmdproxy eval from PreToolUse
 
 Usage:
-  cmdguard <command> [flags]
+  cmdproxy <command> [flags]
 
 Commands:
   init     create the user config and print the Claude Code hook snippet
@@ -300,85 +300,85 @@ Commands:
   eval     hook entrypoint used by Claude Code and other callers
 
 Help:
-  cmdguard help <command>
-  cmdguard <command> --help
+  cmdproxy help <command>
+  cmdproxy <command> --help
 
 Examples:
-  cmdguard init
-  cmdguard test
-  cmdguard check --format json 'git -C repo status'
-  cmdguard doctor --format json
+  cmdproxy init
+  cmdproxy test
+  cmdproxy check --format json 'git -C repo status'
+  cmdproxy doctor --format json
 `)
 }
 
 func writeCommandHelp(w io.Writer, command string) {
 	switch command {
 	case "init":
-		fmt.Fprint(w, `cmdguard init
+		fmt.Fprint(w, `cmdproxy init
 
-Create ~/.config/cmdguard/cmdguard.yml when it does not exist and print the
+Create ~/.config/cmdproxy/cmdproxy.yml when it does not exist and print the
 Claude Code PreToolUse hook snippet.
 
 Usage:
-  cmdguard init
+  cmdproxy init
 
 Typical use:
-  cmdguard init
+  cmdproxy init
 `)
 	case "test":
-		fmt.Fprint(w, `cmdguard test
+		fmt.Fprint(w, `cmdproxy test
 
-Validate every rule in ~/.config/cmdguard/cmdguard.yml.
+Validate every rule in ~/.config/cmdproxy/cmdproxy.yml.
 This is the main command to run after editing rules.
 
 Usage:
-  cmdguard test
+  cmdproxy test
 
 What it checks:
   - every block_examples entry matches its rule matcher
   - every allow_examples entry does not match its rule matcher
 
 Typical use:
-  $EDITOR ~/.config/cmdguard/cmdguard.yml
-  cmdguard test
+  $EDITOR ~/.config/cmdproxy/cmdproxy.yml
+  cmdproxy test
 `)
 	case "check":
-		fmt.Fprint(w, `cmdguard check
+		fmt.Fprint(w, `cmdproxy check
 
 Evaluate one command string against the current rule set.
 Use this while authoring rules before relying on Claude Code hooks.
 
 Usage:
-  cmdguard check [--format json] <command>
+  cmdproxy check [--format json] <command>
 
 Examples:
-  cmdguard check 'git -C repo status'
-  cmdguard check --format json 'AWS_PROFILE=read-only-profile aws s3 ls'
+  cmdproxy check 'git -C repo status'
+  cmdproxy check --format json 'AWS_PROFILE=read-only-profile aws s3 ls'
 `)
 	case "doctor":
-		fmt.Fprint(w, `cmdguard doctor
+		fmt.Fprint(w, `cmdproxy doctor
 
 Inspect config validity, rule quality, and Claude Code hook registration.
 
 Usage:
-  cmdguard doctor [--format json]
+  cmdproxy doctor [--format json]
 
 Examples:
-  cmdguard doctor
-  cmdguard doctor --format json
+  cmdproxy doctor
+  cmdproxy doctor --format json
 `)
 	case "eval":
-		fmt.Fprint(w, `cmdguard eval
+		fmt.Fprint(w, `cmdproxy eval
 
 Hook entrypoint for Claude Code and other callers.
 Reads stdin JSON and returns allow, deny, or error.
 
 Usage:
-  cmdguard eval [--format json]
+  cmdproxy eval [--format json]
 
 Note:
-  You usually do not run this manually. Edit rules and use cmdguard test or
-  cmdguard check instead.
+  You usually do not run this manually. Edit rules and use cmdproxy test or
+  cmdproxy check instead.
 `)
 	default:
 		writeUsage(w)

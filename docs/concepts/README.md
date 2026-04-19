@@ -6,7 +6,7 @@ date: 2026-04-18
 
 # Concepts
 
-This directory stores product-level concept documents for `cmdguard`.
+This directory stores product-level concept documents for `cmdproxy`.
 
 - Scope: problem statement, target users, value proposition, non-goals
 - Out of scope: command contracts and implementation behavior under

@@ -202,7 +202,7 @@ func TestRunInitCreatesStarterConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".config", "cmdguard", "cmdguard.yml"))
+	data, err := os.ReadFile(filepath.Join(home, ".config", "cmdproxy", "cmdproxy.yml"))
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
@@ -222,10 +222,10 @@ func TestRunRootHelpMentionsEditingAndTest(t *testing.T) {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "Edit ~/.config/cmdguard/cmdguard.yml") {
+	if !strings.Contains(out, "Edit ~/.config/cmdproxy/cmdproxy.yml") {
 		t.Fatalf("stdout=%q", out)
 	}
-	if !strings.Contains(out, "cmdguard test") {
+	if !strings.Contains(out, "cmdproxy test") {
 		t.Fatalf("stdout=%q", out)
 	}
 }
@@ -360,7 +360,7 @@ func TestRunCheckFullGuardAllowCases(t *testing.T) {
 
 func writeUserConfig(t *testing.T, home string, body string) {
 	t.Helper()
-	path := filepath.Join(home, ".config", "cmdguard", "cmdguard.yml")
+	path := filepath.Join(home, ".config", "cmdproxy", "cmdproxy.yml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}

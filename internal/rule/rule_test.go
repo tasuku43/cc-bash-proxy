@@ -9,7 +9,7 @@ import (
 
 func TestLoadFileIfPresentValidates(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "cmdguard.yml")
+	path := filepath.Join(dir, "cmdproxy.yml")
 	if err := os.WriteFile(path, []byte("version: 1\nrules: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestLoadFileIfPresentValidates(t *testing.T) {
 func TestLoadEffectiveUsesUserConfig(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	userPath := filepath.Join(home, ".config", "cmdguard", "cmdguard.yml")
+	userPath := filepath.Join(home, ".config", "cmdproxy", "cmdproxy.yml")
 	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ rules:
 
 func TestLoadFileForEvalIfPresentSkipsExamplesButValidates(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "cmdguard.yml")
+	path := filepath.Join(dir, "cmdproxy.yml")
 	cachePath := filepath.Join(t.TempDir(), "eval-cache-v1.json")
 	body := `version: 1
 rules:
@@ -86,7 +86,7 @@ rules:
 
 func TestLoadFileForEvalIfPresentSupportsPredicateRules(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "cmdguard.yml")
+	path := filepath.Join(dir, "cmdproxy.yml")
 	cachePath := filepath.Join(t.TempDir(), "eval-cache-v1.json")
 	body := `version: 1
 rules:
@@ -161,7 +161,7 @@ func TestRuleMatchPredicate(t *testing.T) {
 
 func TestLoadFileIfPresentRejectsPatternAndMatchTogether(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "cmdguard.yml")
+	path := filepath.Join(dir, "cmdproxy.yml")
 	body := `version: 1
 rules:
   - id: bad-rule

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/tasuku43/cmdguard/internal/cli"
+	"github.com/tasuku43/cmdproxy/internal/cli"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-# cmdguard
+# cmdproxy
 
 Declarative, testable command-string policy engine for AI agents and shells.
 
@@ -9,16 +9,16 @@ Declarative, testable command-string policy engine for AI agents and shells.
 
 ## What it does
 
-`cmdguard` is a tiny hook that decides whether a shell command is allowed to
+`cmdproxy` is a tiny hook that decides whether a shell command is allowed to
 run. It is called from Claude Code `PreToolUse`, `zsh` `preexec`,
 `pre-commit`, CI, or anywhere else a command-string policy is useful.
 
 Rules are declared in YAML. Every rule ships with block/allow examples, and
-`cmdguard test` runs them as unit tests — so a rule change that would let
+`cmdproxy test` runs them as unit tests — so a rule change that would let
 through a command it used to block fails CI, not production.
 
 ```yaml
-# ~/.config/cmdguard/cmdguard.yml
+# ~/.config/cmdproxy/cmdproxy.yml
 version: 1
 rules:
   - id: no-git-dash-c
@@ -42,7 +42,7 @@ Rules may use either:
 ## Non-goals
 
 - LLM-assisted rule authoring and transcript mining live in a separate
-  `cmdguard-claude-plugin` repository, so the core CLI has no LLM
+  `cmdproxy-claude-plugin` repository, so the core CLI has no LLM
   dependency.
 - Non-`exec` action types (`write`, `fetch`, `mcp_call`) are post-v1.
 
@@ -53,9 +53,9 @@ See [`docs/README.md`](docs/README.md) for the current documentation map.
 Not yet released. Once v1 ships:
 
 ```sh
-brew install tasuku43/tap/cmdguard
+brew install tasuku43/tap/cmdproxy
 # or
-go install github.com/tasuku43/cmdguard/cmd/cmdguard@latest
+go install github.com/tasuku43/cmdproxy/cmd/cmdproxy@latest
 ```
 
 ## Setup
@@ -63,18 +63,18 @@ go install github.com/tasuku43/cmdguard/cmd/cmdguard@latest
 ### 1. Initialize the user config
 
 ```sh
-cmdguard init
+cmdproxy init
 ```
 
 This creates the default rule file at:
 
 ```text
-~/.config/cmdguard/cmdguard.yml
+~/.config/cmdproxy/cmdproxy.yml
 ```
 
 ### 2. Edit rules
 
-Update `~/.config/cmdguard/cmdguard.yml` directly.
+Update `~/.config/cmdproxy/cmdproxy.yml` directly.
 For every rule, keep both:
 
 - `block_examples`
@@ -85,19 +85,19 @@ For every rule, keep both:
 Run the main authoring command after every rule edit:
 
 ```sh
-cmdguard test
+cmdproxy test
 ```
 
-Use `cmdguard check` for spot checks against concrete commands:
+Use `cmdproxy check` for spot checks against concrete commands:
 
 ```sh
-cmdguard check --format json 'git -C repo status'
-cmdguard check --format json 'AWS_PROFILE=read-only-profile aws s3 ls'
+cmdproxy check --format json 'git -C repo status'
+cmdproxy check --format json 'AWS_PROFILE=read-only-profile aws s3 ls'
 ```
 
 ## Claude Code Hook Setup
 
-Register `cmdguard eval` as a `PreToolUse` hook for `Bash`.
+Register `cmdproxy eval` as a `PreToolUse` hook for `Bash`.
 
 Example:
 
@@ -108,7 +108,7 @@ Example:
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "cmdguard eval" }
+          { "type": "command", "command": "cmdproxy eval" }
         ]
       }
     ]
@@ -119,7 +119,7 @@ Example:
 ### Hook ordering with other tools
 
 If you also use another `PreToolUse` Bash hook such as `rtk hook claude`,
-register `cmdguard eval` first.
+register `cmdproxy eval` first.
 
 Recommended order:
 
@@ -130,7 +130,7 @@ Recommended order:
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "cmdguard eval" }
+          { "type": "command", "command": "cmdproxy eval" }
         ]
       },
       {
@@ -144,7 +144,7 @@ Recommended order:
 }
 ```
 
-This keeps `cmdguard` as the first deny gate before other hook-side behavior
+This keeps `cmdproxy` as the first deny gate before other hook-side behavior
 runs.
 
 ## License

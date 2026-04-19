@@ -1,20 +1,20 @@
 ---
-title: "cmdguard check"
+title: "cmdproxy check"
 status: implemented
 date: 2026-04-18
 ---
 
-# cmdguard check
+# cmdproxy check
 
 ## Purpose
 
-`cmdguard check` evaluates a single command string interactively without
+`cmdproxy check` evaluates a single command string interactively without
 requiring stdin JSON from an external hook.
 
 ## Relationship to `eval`
 
-`cmdguard check` is a convenience wrapper over the same evaluation logic used by
-`cmdguard eval`.
+`cmdproxy check` is a convenience wrapper over the same evaluation logic used by
+`cmdproxy eval`.
 
 - It accepts a command string as a CLI argument or flag
 - It constructs the canonical execution input internally
@@ -29,8 +29,8 @@ requiring stdin JSON from an external hook.
 
 ## Output
 
-By default, `cmdguard check` should present the same decision shape as
-`cmdguard eval`.
+By default, `cmdproxy check` should present the same decision shape as
+`cmdproxy eval`.
 
 - allow: no output, exit `0`
 - deny: human-readable stderr, exit `2`

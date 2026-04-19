@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"github.com/tasuku43/cmdguard/internal/input"
-	"github.com/tasuku43/cmdguard/internal/rule"
+	"github.com/tasuku43/cmdproxy/internal/input"
+	"github.com/tasuku43/cmdproxy/internal/rule"
 )
 
 type Decision struct {

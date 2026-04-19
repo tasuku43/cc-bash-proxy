@@ -1,12 +1,12 @@
 ---
-title: "cmdguard specs"
+title: "cmdproxy specs"
 status: implemented
 date: 2026-04-18
 ---
 
-# cmdguard specs
+# cmdproxy specs
 
-This directory contains the implementation contracts for `cmdguard`.
+This directory contains the implementation contracts for `cmdproxy`.
 Implementation should follow these specs. When behavior changes, update the
 relevant spec first.
 
@@ -23,7 +23,7 @@ relevant spec first.
 
 ## v1 contract priorities
 
-`cmdguard` v1 prioritizes deterministic runtime behavior over expressive rule
+`cmdproxy` v1 prioritizes deterministic runtime behavior over expressive rule
 features. The core CLI contract is:
 
 1. Deny-only rule model

@@ -9,7 +9,7 @@ date: 2026-04-18
 ## 1. Scope
 
 This document defines the intended compatibility and distribution stance for
-`cmdguard` v1.
+`cmdproxy` v1.
 
 ## 2. Rule Schema Stability
 
@@ -20,7 +20,7 @@ v1 commits to the stability of schema `version: 1`.
 
 ## 3. Runtime Expectations
 
-`cmdguard` is intended to run as:
+`cmdproxy` is intended to run as:
 
 - a local CLI in developer environments
 - a hook target for AI-agent and shell integrations
@@ -36,7 +36,7 @@ The implementation should favor:
 
 Planned v1 distribution channels are:
 
-- `go install github.com/tasuku43/cmdguard/cmd/cmdguard@latest`
+- `go install github.com/tasuku43/cmdproxy/cmd/cmdproxy@latest`
 - GitHub Releases
 - Homebrew tap
 

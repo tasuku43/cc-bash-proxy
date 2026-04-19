@@ -8,7 +8,7 @@ date: 2026-04-18
 
 ## 1. Purpose
 
-This document defines the product-level purpose of `cmdguard`: the problem it
+This document defines the product-level purpose of `cmdproxy`: the problem it
 solves, who it is for, and what value it should deliver.
 
 ## 2. Problem
@@ -36,7 +36,7 @@ behavior is most important.
 
 ## 4. Operating Context
 
-- `cmdguard` runs as a local CLI, usually from a hook
+- `cmdproxy` runs as a local CLI, usually from a hook
 - The caller provides stdin JSON describing an attempted command execution
 - v1 evaluates command strings only; it does not inspect file writes, network
   fetches, or MCP calls
@@ -44,7 +44,7 @@ behavior is most important.
 
 ## 5. Core Value Proposition
 
-`cmdguard` should let users define command-deny policies declaratively and
+`cmdproxy` should let users define command-deny policies declaratively and
 verify those policies before rollout, while providing deterministic runtime
 behavior when a command is denied.
 

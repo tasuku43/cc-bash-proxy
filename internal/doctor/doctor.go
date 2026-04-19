@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tasuku43/cmdguard/internal/rule"
+	"github.com/tasuku43/cmdproxy/internal/rule"
 )
 
 type Status string
@@ -72,19 +72,19 @@ func Run(loaded rule.Loaded, home string) Report {
 		checks = append(checks, Check{ID: "rules.shadowing", Category: "diagnostics", Status: StatusPass, Message: "no obvious shadowing detected"})
 	}
 
-	if path, err := exec.LookPath("cmdguard"); err == nil {
-		checks = append(checks, Check{ID: "install.binary-on-path", Category: "install", Status: StatusPass, Message: "cmdguard found on PATH at " + path})
+	if path, err := exec.LookPath("cmdproxy"); err == nil {
+		checks = append(checks, Check{ID: "install.binary-on-path", Category: "install", Status: StatusPass, Message: "cmdproxy found on PATH at " + path})
 	} else {
-		checks = append(checks, Check{ID: "install.binary-on-path", Category: "install", Status: StatusWarn, Message: "cmdguard not found on PATH"})
+		checks = append(checks, Check{ID: "install.binary-on-path", Category: "install", Status: StatusWarn, Message: "cmdproxy not found on PATH"})
 	}
 
 	claudeSettings := filepath.Join(home, ".claude", "settings.json")
 	if _, err := os.Stat(claudeSettings); err == nil {
 		data, readErr := os.ReadFile(claudeSettings)
-		if readErr == nil && strings.Contains(string(data), "cmdguard eval") && strings.Contains(string(data), "\"matcher\": \"Bash\"") {
+		if readErr == nil && strings.Contains(string(data), "cmdproxy eval") && strings.Contains(string(data), "\"matcher\": \"Bash\"") {
 			checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusPass, Message: "Claude Code hook registration detected"})
 		} else {
-			checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusWarn, Message: "Claude Code settings found but cmdguard eval hook not detected"})
+			checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusWarn, Message: "Claude Code settings found but cmdproxy eval hook not detected"})
 		}
 	} else {
 		checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusWarn, Message: "Claude Code settings.json not found"})

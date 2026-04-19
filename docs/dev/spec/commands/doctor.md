@@ -1,14 +1,14 @@
 ---
-title: "cmdguard doctor"
+title: "cmdproxy doctor"
 status: implemented
 date: 2026-04-18
 ---
 
-# cmdguard doctor
+# cmdproxy doctor
 
 ## Purpose
 
-`cmdguard doctor` reports the health of the current `cmdguard` setup, including
+`cmdproxy doctor` reports the health of the current `cmdproxy` setup, including
 configuration validity, rule quality, and installation state.
 
 ## Categories
@@ -44,7 +44,7 @@ simple and order-sensitive.
 
 ## Output Modes
 
-`cmdguard doctor` supports:
+`cmdproxy doctor` supports:
 
 - default human-readable output
 - `--format json` structured output

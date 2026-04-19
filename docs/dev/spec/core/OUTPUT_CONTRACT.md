@@ -8,11 +8,11 @@ date: 2026-04-18
 
 ## 1. Scope
 
-This document defines exit codes and output behavior for `cmdguard eval` v1.
+This document defines exit codes and output behavior for `cmdproxy eval` v1.
 
 ## 2. Exit Codes
 
-`cmdguard eval` uses the following process exit codes:
+`cmdproxy eval` uses the following process exit codes:
 
 - `0`: allow
 - `2`: deny
@@ -44,7 +44,7 @@ that adds useful context, but `rule_id` and `message` are the minimum contract.
 
 ## 5. JSON Output Mode
 
-`cmdguard eval --format json` emits a single JSON object describing the result.
+`cmdproxy eval --format json` emits a single JSON object describing the result.
 
 ### Allow payload
 
@@ -64,7 +64,7 @@ that adds useful context, but `rule_id` and `message` are the minimum contract.
   "command": "git -C repos/foo status",
   "source": {
     "layer": "user",
-    "path": "/home/alice/.config/cmdguard/cmdguard.yml"
+    "path": "/home/alice/.config/cmdproxy/cmdproxy.yml"
   }
 }
 ```

@@ -1,4 +1,4 @@
-module github.com/tasuku43/cmdguard
+module github.com/tasuku43/cmdproxy
 
 go 1.25.0
 

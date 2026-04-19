@@ -1,19 +1,19 @@
 ---
-title: "cmdguard test"
+title: "cmdproxy test"
 status: implemented
 date: 2026-04-18
 ---
 
-# cmdguard test
+# cmdproxy test
 
 ## Purpose
 
-`cmdguard test` validates that configured rules behave as claimed by their
+`cmdproxy test` validates that configured rules behave as claimed by their
 embedded examples.
 
 ## Core Behavior
 
-For every loaded rule, `cmdguard test` must verify:
+For every loaded rule, `cmdproxy test` must verify:
 
 - every `block_examples` entry matches the rule's matcher
 - every `allow_examples` entry does not match the rule's matcher
@@ -25,12 +25,12 @@ If all checks pass, the command exits successfully.
 - `0`: all rule examples pass
 - `1`: any example fails, configuration is invalid, or runtime execution fails
 
-`cmdguard test` does not use the `deny` exit code because it is not evaluating a
+`cmdproxy test` does not use the `deny` exit code because it is not evaluating a
 live command decision.
 
 ## Scope of Verification
 
-v1 `cmdguard test` verifies rule-local claims, not full merged runtime behavior.
+v1 `cmdproxy test` verifies rule-local claims, not full merged runtime behavior.
 
 Specifically, it does:
 

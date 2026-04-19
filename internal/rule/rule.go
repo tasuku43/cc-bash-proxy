@@ -104,7 +104,7 @@ func ConfigPaths(home string, xdgConfigHome string) []Source {
 	}
 	return []Source{{
 		Layer: LayerUser,
-		Path:  filepath.Join(userConfigBase, "cmdguard", "cmdguard.yml"),
+		Path:  filepath.Join(userConfigBase, "cmdproxy", "cmdproxy.yml"),
 	}}
 }
 
@@ -113,7 +113,7 @@ func CachePath(home string, xdgCacheHome string) string {
 	if cacheBase == "" {
 		cacheBase = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(cacheBase, "cmdguard", "eval-cache-v1.json")
+	return filepath.Join(cacheBase, "cmdproxy", "eval-cache-v1.json")
 }
 
 func LoadEffective(cwd string, home string, xdgConfigHome string) Loaded {

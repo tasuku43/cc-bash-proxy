@@ -3,8 +3,8 @@ package engine
 import (
 	"testing"
 
-	"github.com/tasuku43/cmdguard/internal/input"
-	"github.com/tasuku43/cmdguard/internal/rule"
+	"github.com/tasuku43/cmdproxy/internal/input"
+	"github.com/tasuku43/cmdproxy/internal/rule"
 )
 
 func TestEvaluateFirstMatchWins(t *testing.T) {

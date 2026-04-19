@@ -6,7 +6,7 @@ date: 2026-04-18
 
 # Developer Documentation
 
-Start here if your goal is to implement or review `cmdguard`.
+Start here if your goal is to implement or review `cmdproxy`.
 
 ## Entry
 
