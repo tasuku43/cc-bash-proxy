@@ -1,9 +1,3 @@
----
-title: "User Documentation"
-status: implemented
-date: 2026-04-18
----
-
 # User Documentation
 
 Start here if your goal is to use `cmdproxy` in local workflows.
@@ -12,11 +6,17 @@ Start here if your goal is to use `cmdproxy` in local workflows.
 
 - `docs/user/START_HERE.md`
 
-## Planned guides
+## Current Focus
 
-- `RULES.md`: how to write rules safely
-- `CLAUDE_CODE.md`: Claude Code hook usage
+- user-wide config at `~/.config/cmdproxy/cmdproxy.yml`
+- rule editing followed by `cmdproxy test`
+- hook integration via `cmdproxy eval`
+
+## Intended Guide Set
+
+- `RULES.md`: writing directive-based rules safely
+- `CLAUDE_CODE.md`: Claude Code hook usage and permission layering
 - `SHELL.md`: shell and CI integration patterns
 
-These guides are not written yet, but this directory is the intended home for
-user-facing documentation.
+These guides are not written yet, but this directory remains the intended home
+for user-facing documentation.

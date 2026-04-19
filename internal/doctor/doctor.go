@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tasuku43/cmdproxy/internal/rule"
+	"github.com/tasuku43/cmdproxy/internal/config"
+	"github.com/tasuku43/cmdproxy/internal/domain/policy"
 )
 
 type Status string
@@ -28,7 +29,7 @@ type Report struct {
 	Checks []Check `json:"checks"`
 }
 
-func Run(loaded rule.Loaded, home string) Report {
+func Run(loaded config.Loaded, home string) Report {
 	var checks []Check
 
 	if len(loaded.Errors) == 0 {
@@ -40,7 +41,7 @@ func Run(loaded rule.Loaded, home string) Report {
 			Check{ID: "rules.examples-present", Category: "rules", Status: StatusPass, Message: "examples are present"},
 		)
 	} else {
-		msg := strings.Join(rule.ErrorStrings(loaded.Errors), "; ")
+		msg := strings.Join(policy.ErrorStrings(loaded.Errors), "; ")
 		checks = append(checks,
 			Check{ID: "config.parse", Category: "config", Status: StatusFail, Message: msg},
 			Check{ID: "config.schema", Category: "config", Status: StatusFail, Message: msg},
@@ -102,7 +103,7 @@ func HasFailures(report Report) bool {
 	return false
 }
 
-func examplesPass(rules []rule.Rule) error {
+func examplesPass(rules []policy.Rule) error {
 	for _, r := range rules {
 		for _, ex := range r.BlockExamples {
 			matched, err := r.Match(ex)
@@ -136,7 +137,7 @@ func (e *exampleError) Error() string {
 	return "rule " + e.RuleID + " has failing " + e.Kind + " example: " + e.Example
 }
 
-func broadnessWarning(rules []rule.Rule) string {
+func broadnessWarning(rules []policy.Rule) string {
 	for _, r := range rules {
 		if r.Pattern == "" {
 			continue
@@ -148,7 +149,7 @@ func broadnessWarning(rules []rule.Rule) string {
 	return ""
 }
 
-func shadowingWarning(rules []rule.Rule) string {
+func shadowingWarning(rules []policy.Rule) string {
 	for i := 0; i < len(rules); i++ {
 		for j := i + 1; j < len(rules); j++ {
 			for _, ex := range rules[j].BlockExamples {

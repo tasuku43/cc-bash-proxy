@@ -1,65 +1,33 @@
 ---
 title: "cmdproxy doctor"
-status: implemented
-date: 2026-04-18
+status: proposed
+date: 2026-04-19
 ---
 
 # cmdproxy doctor
 
 ## Purpose
 
-`cmdproxy doctor` reports the health of the current `cmdproxy` setup, including
-configuration validity, rule quality, and installation state.
+`cmdproxy doctor` reports the health of the current `cmdproxy` setup,
+configuration, and integration posture.
 
 ## Categories
 
-v1 doctor checks should be grouped into these categories:
+Target doctor checks should be grouped into:
 
-- `config`: file presence, parseability, schema validity
-- `rules`: matcher validation, examples present, examples pass
-- `diagnostics`: quality warnings such as likely shadowing or broad patterns
-- `install`: binary and supported hook integration checks
+- `config`: config presence, parseability, schema validity
+- `rules`: matcher validity, directive validity, examples present, examples pass
+- `diagnostics`: likely shadowing, broad regex escape hatches, risky rule order
+- `install`: binary presence and supported hook integration checks
 
-## Required v1 Checks
+## Role During The Transition
 
-At minimum, doctor should cover:
+As the project moves from deny-only rules to directive-based policy, `doctor`
+should make the transition visible by flagging:
 
-- config parsing for every discovered layer
-- schema validation for every loaded rule
-- duplicate rule IDs
-- matcher validation
-- example presence
-- example pass/fail status
-- Claude Code hook registration presence, when that environment exists
+- legacy patterns that should become structured matchers
+- rules that still rely on broad regex escape hatches
+- config that cannot express rewrite behavior yet
 
-## Recommended Diagnostic Warnings
-
-The following should be warnings rather than hard failures in v1:
-
-- likely rule shadowing caused by first-match order
-- overly broad patterns that match many allow examples unintentionally
-
-These warnings are useful because v1 keeps the runtime model intentionally
-simple and order-sensitive.
-
-## Output Modes
-
-`cmdproxy doctor` supports:
-
-- default human-readable output
-- `--format json` structured output
-
-The JSON form should be stable enough for CI consumption and should include at
-least:
-
-- check ID
-- category
-- status
-- summary message
-
-## Exit Behavior
-
-- `0`: no failing checks
-- `1`: one or more failing checks, or doctor itself encountered an error
-
-Warnings alone should not make the command fail in v1.
+Warnings remain non-fatal. Hard failures should be reserved for broken config or
+invalid rule definitions.

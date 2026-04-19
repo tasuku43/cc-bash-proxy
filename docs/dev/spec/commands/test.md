@@ -1,7 +1,7 @@
 ---
 title: "cmdproxy test"
-status: implemented
-date: 2026-04-18
+status: proposed
+date: 2026-04-19
 ---
 
 # cmdproxy test
@@ -11,46 +11,33 @@ date: 2026-04-18
 `cmdproxy test` validates that configured rules behave as claimed by their
 embedded examples.
 
-## Core Behavior
+## Target Behavior
 
-For every loaded rule, `cmdproxy test` must verify:
+For every loaded rule, `cmdproxy test` should verify the rule's declared
+directive behavior.
 
-- every `block_examples` entry matches the rule's matcher
-- every `allow_examples` entry does not match the rule's matcher
+That means examples should be able to express at least:
 
-If all checks pass, the command exits successfully.
+- rewrite: input becomes a specific canonical output
+- reject: input is blocked
+- pass: input is not matched by the rule
+
+## Scope
+
+`cmdproxy test` is for rule-local verification.
+
+It should:
+
+- parse and validate the config
+- validate matcher and directive payloads
+- run each example against the rule's own matcher and directive
+
+It should not:
+
+- simulate full multi-rule downstream permission behavior
+- replace dedicated integration tests for Claude Code hook semantics
 
 ## Exit Behavior
 
 - `0`: all rule examples pass
-- `1`: any example fails, configuration is invalid, or runtime execution fails
-
-`cmdproxy test` does not use the `deny` exit code because it is not evaluating a
-live command decision.
-
-## Scope of Verification
-
-v1 `cmdproxy test` verifies rule-local claims, not full merged runtime behavior.
-
-Specifically, it does:
-
-- parse and validate loaded config
-- validate rule matchers
-- check example truth against the rule's own matcher
-
-It does not:
-
-- simulate first-match selection across multiple rules
-- fail on shadowing between rules
-- evaluate external adapter payloads
-
-Those concerns belong to `doctor` or dedicated integration tests.
-
-## Output
-
-Default output should be concise and human-readable.
-
-- Success: summary of rules and examples checked
-- Failure: each failing rule/example pair with the expected and actual result
-
-Machine-readable output is post-v1 unless specified separately.
+- `1`: any example fails or configuration is invalid

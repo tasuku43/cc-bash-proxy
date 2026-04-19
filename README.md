@@ -1,152 +1,137 @@
 # cmdproxy
 
-Declarative, testable command-string policy engine for AI agents and shells.
+Policy proxy for CLI invocations used by AI agents and shell hooks.
 
-> **Status:** v1 core implementation in progress. See
-> [`docs/dev/spec/README.md`](docs/dev/spec/README.md) for the v1.0 implementation contracts and
-> [`docs/concepts/product-concept.md`](docs/concepts/product-concept.md) for the
-> product concept.
+`cmdproxy` sits in front of command execution and preserves permission intent by
+normalizing command shape before the caller's own allow / ask / deny layer runs.
 
-## What it does
+## Value Proposition
 
-`cmdproxy` is a tiny hook that decides whether a shell command is allowed to
-run. It is called from Claude Code `PreToolUse`, `zsh` `preexec`,
-`pre-commit`, CI, or anywhere else a command-string policy is useful.
+`cmdproxy` is not primarily a dangerous-command blocker.
 
-Rules are declared in YAML. Every rule ships with block/allow examples, and
-`cmdproxy test` runs them as unit tests — so a rule change that would let
-through a command it used to block fails CI, not production.
+It exists to make approved CLIs run in approved ways.
 
-```yaml
-# ~/.config/cmdproxy/cmdproxy.yml
-version: 1
-rules:
-  - id: no-git-dash-c
-    match:
-      command: git
-      args_contains:
-        - "-C"
-    message: "git -C is blocked. Change into the target directory and rerun the command."
-    block_examples:
-      - "git -C repos/foo status"
-    allow_examples:
-      - "git status"
-      - "# git -C in comment"
-```
+Typical examples:
 
-Rules may use either:
+- rewrite `aws --profile prod s3 ls` into `AWS_PROFILE=prod aws s3 ls`
+- rewrite `bash -c 'git status'` into `git status`
+- reject invocation shapes that must not pass through unchanged
 
-- `match`: structured predicate matching, recommended for new rules
-- `pattern`: a raw RE2 regular expression, kept as an escape hatch
+This makes downstream permission systems more predictable, because they evaluate
+canonical command shapes instead of wrapper-heavy or drifted invocations.
 
-## Non-goals
+## Current Status
 
-- LLM-assisted rule authoring and transcript mining live in a separate
-  `cmdproxy-claude-plugin` repository, so the core CLI has no LLM
-  dependency.
-- Non-`exec` action types (`write`, `fetch`, `mcp_call`) are post-v1.
+The repository is transitioning from the earlier `cmdguard` deny-only model to a
+directive-driven `cmdproxy` model.
 
-See [`docs/README.md`](docs/README.md) for the current documentation map.
+Today, the codebase already supports:
 
-## Install
+- `match` and `pattern` based rule matching
+- `reject` directives
+- `rewrite.unwrap_shell_dash_c`
+- `rewrite.move_flag_to_env`
+- ordered first-match evaluation
+- `cmdproxy test`, `cmdproxy check`, `cmdproxy doctor`, and `cmdproxy eval`
 
-Not yet released. Once v1 ships:
+The current on-disk config format is still `version: 1` and still uses
+`block_examples` / `allow_examples` for rule tests.
 
-```sh
-brew install tasuku43/tap/cmdproxy
-# or
-go install github.com/tasuku43/cmdproxy/cmd/cmdproxy@latest
-```
+## Typical Workflow
 
-## Setup
-
-### 1. Initialize the user config
+1. Initialize user config
 
 ```sh
 cmdproxy init
 ```
 
-This creates the default rule file at:
+2. Edit `~/.config/cmdproxy/cmdproxy.yml`
 
-```text
-~/.config/cmdproxy/cmdproxy.yml
-```
-
-### 2. Edit rules
-
-Update `~/.config/cmdproxy/cmdproxy.yml` directly.
-For every rule, keep both:
-
-- `block_examples`
-- `allow_examples`
-
-### 3. Validate changes
-
-Run the main authoring command after every rule edit:
+3. Validate rules
 
 ```sh
 cmdproxy test
+cmdproxy check aws --profile read-only-profile s3 ls
+cmdproxy doctor --format json
 ```
 
-Use `cmdproxy check` for spot checks against concrete commands:
+4. Register `cmdproxy eval` in your hook runner
 
-```sh
-cmdproxy check --format json 'git -C repo status'
-cmdproxy check --format json 'AWS_PROFILE=read-only-profile aws s3 ls'
-```
+## Claude Code Setup
 
-## Claude Code Hook Setup
+`cmdproxy` is intended to run before Claude Code permissions are evaluated.
 
-Register `cmdproxy eval` as a `PreToolUse` hook for `Bash`.
-
-Example:
+Add a `PreToolUse` Bash hook that calls `cmdproxy eval`.
 
 ```json
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "cmdproxy eval" }
-        ]
-      }
-    ]
-  }
+  "matcher": "Bash",
+  "hooks": [
+    { "type": "command", "command": "cmdproxy eval" }
+  ]
 }
 ```
 
-### Hook ordering with other tools
+If you also use another Bash hook such as `rtk hook claude`, place
+`cmdproxy eval` first so canonicalization and rejection happen before later
+hook-side processing.
 
-If you also use another `PreToolUse` Bash hook such as `rtk hook claude`,
-register `cmdproxy eval` first.
+## Current Config Shape
 
-Recommended order:
+The currently implemented config file looks like this:
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "cmdproxy eval" }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "rtk hook claude" }
-        ]
-      }
-    ]
-  }
-}
+```yaml
+version: 1
+rules:
+  - id: aws-profile-to-env
+    match:
+      command: aws
+      args_contains:
+        - "--profile"
+    rewrite:
+      move_flag_to_env:
+        flag: "--profile"
+        env: "AWS_PROFILE"
+    block_examples:
+      - "aws --profile read-only-profile s3 ls"
+    allow_examples:
+      - "AWS_PROFILE=read-only-profile aws s3 ls"
+
+  - id: no-shell-dash-c
+    match:
+      command_in:
+        - bash
+        - sh
+        - zsh
+        - dash
+        - ksh
+      args_contains:
+        - "-c"
+    reject:
+      message: "shell -c must not pass through unchanged. Run the command directly instead."
+    block_examples:
+      - "bash -c 'git status && git diff'"
+    allow_examples:
+      - "git status"
 ```
 
-This keeps `cmdproxy` as the first deny gate before other hook-side behavior
-runs.
+## Design Direction
+
+The long-term model is directive-driven:
+
+- `rewrite`: canonicalize invocation shape
+- `reject`: stop invocation shapes that must not pass through unchanged
+- implicit `pass`: forward unmatched invocations unchanged
+
+Caller input stays intentionally simple: a raw command string in, structured
+policy evaluation inside `cmdproxy`.
+
+## Documentation
+
+- Product concept: [docs/concepts/product-concept.md](docs/concepts/product-concept.md)
+- Developer spec: [docs/dev/spec/README.md](docs/dev/spec/README.md)
+- User docs: [docs/user/README.md](docs/user/README.md)
 
 ## License
 
-MIT.
+MIT

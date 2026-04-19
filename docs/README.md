@@ -1,19 +1,17 @@
----
-title: "docs"
-status: implemented
-date: 2026-04-18
----
-
 # Documentation
 
-## Choose your path
+## Choose Your Path
 
 - User docs: `docs/user/README.md`
 - Developer docs: `docs/dev/README.md`
 - Product concept: `docs/concepts/product-concept.md`
 
-## Current structure
+## Current Structure
 
-- `docs/concepts/`: product-level purpose and non-goals
-- `docs/dev/spec/`: implementation contracts for v1
-- `docs/user/`: user-facing entrypoints and guides
+- `docs/concepts/`: product definition and positioning
+- `docs/dev/spec/`: target implementation contracts
+- `docs/user/`: user-facing guidance
+
+The repository is in the middle of a redesign from a deny-only guard toward a
+directive-driven invocation policy proxy, so many documents intentionally
+describe the target state rather than the exact current implementation.

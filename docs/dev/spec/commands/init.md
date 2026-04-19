@@ -1,50 +1,41 @@
 ---
 title: "cmdproxy init"
-status: implemented
-date: 2026-04-18
+status: proposed
+date: 2026-04-19
 ---
 
 # cmdproxy init
 
 ## Purpose
 
-`cmdproxy init` bootstraps a local `cmdproxy` setup without silently modifying
-existing user configuration in unsafe ways.
+`cmdproxy init` bootstraps a local `cmdproxy` setup without destructively
+modifying existing user configuration.
 
-## v1 Responsibilities
+## Target Responsibilities
 
-`cmdproxy init` may:
+`cmdproxy init` should:
 
 - create a starter user-wide config when one does not exist
 - explain where the user-wide config lives
 - detect compatible Claude Code settings files
 - print the hook snippet needed to register `cmdproxy eval`
 
-## Safety Principle
+## Starter Config Goal
 
-v1 `init` should optimize for idempotence and non-destructive setup.
+The starter config should reflect the new product identity.
 
-- If the user-wide config already exists, do not overwrite it
-- If Claude Code hook registration already exists or settings are non-trivial,
-  prefer reporting status and proposed changes over blind mutation
-- If automatic mutation is supported, it should be conservative and explicit
+It should:
 
-## Recommended Starter Config
-
-The starter config should:
-
-- use schema version `1`
-- include at least one sample deny rule
-- demonstrate both `block_examples` and `allow_examples`
+- use the current target schema version
+- demonstrate at least one structured matcher
+- demonstrate a directive, preferably `rewrite` or `reject`
+- include examples that show the intended rule effect
 - be valid under `cmdproxy test`
 
-## Output
+## Safety Principle
 
-Default output should clearly separate:
+`init` should remain conservative and idempotent.
 
-- what was created
-- what was detected
-- what still requires manual action
-
-This is especially important because `init` often runs once, long before a user
-debugs hook behavior later.
+- never overwrite an existing user config silently
+- prefer showing status and next steps over mutating non-trivial caller config
+- keep the generated starter config small and explanatory

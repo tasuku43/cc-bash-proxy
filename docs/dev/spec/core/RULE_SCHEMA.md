@@ -1,125 +1,188 @@
 ---
 title: "Rule Schema"
-status: implemented
-date: 2026-04-18
+status: proposed
+date: 2026-04-19
 ---
 
 # Rule Schema
 
 ## 1. Scope
 
-This document defines the v1 YAML schema for `cmdproxy` rule files.
+This document defines the target directive-based YAML schema for `cmdproxy`.
 
-## 2. Top-Level Shape
+## 2. Transitional Implemented Shape
 
-The v1 configuration file is a single YAML document with this shape:
+The currently implemented on-disk configuration shape is:
 
 ```yaml
 version: 1
 rules:
-  - id: no-git-dash-c
+  - id: aws-profile-to-env
     match:
-      command: git
+      command: aws
       args_contains:
-        - "-C"
-    message: "git -C is blocked. Change into the target directory and rerun the command."
+        - "--profile"
+    rewrite:
+      move_flag_to_env:
+        flag: "--profile"
+        env: "AWS_PROFILE"
     block_examples:
-      - "git -C repos/foo status"
+      - "aws --profile prod s3 ls"
+    allow_examples:
+      - "AWS_PROFILE=prod aws s3 ls"
+
+  - id: no-shell-dash-c
+    match:
+      command_in: ["bash", "sh", "zsh", "dash", "ksh"]
+      args_contains: ["-c"]
+    reject:
+      message: "shell -c must not pass through unchanged."
+    block_examples:
+      - "bash -c 'git status && git diff'"
     allow_examples:
       - "git status"
 ```
 
-## 3. Top-Level Fields
+This transitional shape keeps `version: 1` and still uses
+`block_examples` / `allow_examples`.
 
-- `version`: required, integer, must be `1`
-- `rules`: required, non-empty array of rule objects
+## 3. Target Shape
 
-Unknown top-level keys are invalid in v1.
+The target configuration shape is:
 
-## 4. Rule Fields
+```yaml
+version: 2
+rules:
+  - id: aws-profile-to-env
+    match:
+      command: aws
+      args_contains:
+        - "--profile"
+    rewrite:
+      move_flag_to_env:
+        flag: "--profile"
+        env: "AWS_PROFILE"
+    examples:
+      - in: "aws --profile prod s3 ls"
+        out: "AWS_PROFILE=prod aws s3 ls"
+
+  - id: no-shell-dash-c
+    match:
+      command_in: ["bash", "sh", "zsh", "dash", "ksh"]
+      args_contains: ["-c"]
+    reject:
+      message: "shell -c must not pass through unchanged."
+    examples:
+      - in: "bash -c 'git status && git diff'"
+        reject: true
+```
+
+## 4. Top-Level Fields
+
+- `version`: required integer, currently `1`, target value `2`
+- `rules`: required non-empty array of rule objects
+
+Unknown top-level keys are invalid.
+
+## 5. Rule Fields
 
 Each rule object must contain:
 
 - `id`: required string
 - exactly one of `match` or `pattern`
-- `message`: required string
-- `block_examples`: required non-empty array of strings
-- `allow_examples`: required non-empty array of strings
+- exactly one of `rewrite` or `reject`
+- examples, currently as `block_examples` and `allow_examples`
 
-Unknown rule-level keys are invalid in v1.
+Unknown rule-level keys are invalid.
 
-## 5. Field Constraints
-
-### `id`
-
-- Must match: `[a-z0-9][a-z0-9-]*`
-- Must be unique across all loaded layers
-- Should remain stable over time so tests and runtime output can refer to it
+## 6. Matcher Fields
 
 ### `match`
 
-`match` is the recommended matcher for new rules.
+`match` is the preferred matcher model.
 
-Supported fields in v1:
+Target fields:
 
-- `command`: exact executable basename match
-- `command_in`: executable basename must be one of these values
-- `subcommand`: first argument after the executable must match exactly
-- `args_contains`: each listed argument token must be present exactly
-- `args_prefixes`: each listed prefix must match at least one argument token
-- `env_requires`: each listed environment variable must be present in command
-  prefixes such as `AWS_PROFILE=dev aws s3 ls`
-- `env_missing`: each listed environment variable must be absent from command
-  prefixes
+- `command`
+- `command_in`
+- `subcommand`
+- `args_contains`
+- `args_prefixes`
+- `env_requires`
+- `env_missing`
 
-The matcher is evaluated against `cmdproxy`'s internal command parsing, not
-against the raw input string directly.
+The matcher operates on `cmdproxy`'s internal normalized invocation model.
 
 ### `pattern`
 
-- Must compile as a Go RE2 regular expression
-- Is evaluated against the full command string as provided by the caller
-- Is kept as an escape hatch when `match` is not expressive enough
-- v1 does not define capture-group semantics or replacement behavior
+`pattern` remains available as an escape hatch for invocation shapes that are
+not yet well represented by structured matchers.
 
-### `message`
+- Must compile as Go RE2
+- Matches against the raw command string
+- Should be used sparingly where structured matching is insufficient
 
-- Must be a non-empty human-readable string
-- Should explain both the reason for the deny and the preferred alternative
-- v1 does not attempt to lint natural-language quality heuristically
+## 7. Directive Fields
 
-### `block_examples`
+### `rewrite`
 
-- Must contain at least one example
-- Every example must match the rule's matcher
+`rewrite` contains a typed rewrite primitive.
 
-### `allow_examples`
+Initial target primitives are intentionally narrow, for example:
 
-- Must contain at least one example
-- Every example must not match the rule's matcher
+- `move_flag_to_env`
+- `unwrap_shell_dash_c`
+- `strip_wrapper`
 
-## 6. Validation Model
+The currently implemented primitives are:
+
+- `move_flag_to_env`
+- `unwrap_shell_dash_c`
+
+Each primitive should have a dedicated structured payload. Free-form string
+templates are out of scope.
+
+### `reject`
+
+`reject` contains:
+
+- `message`: required string
+
+Future metadata is possible, but the minimal contract is a stable human-readable
+explanation.
+
+## 8. Examples
+
+Examples validate rule intent at the directive level.
+
+Today, examples are stored as:
+
+- `block_examples`
+- `allow_examples`
+
+Each example should describe one of:
+
+- `in` + `out` for rewrite behavior
+- `in` + `reject: true` for reject behavior
+- `in` + `pass: true` when a non-match example is useful
+
+The exact final example schema may still evolve, but examples remain mandatory.
+
+## 9. Validation Model
 
 Validation is strict and aggregate.
 
-- Parsing should report all discovered schema issues in one run
-- Regex compilation failures are validation errors
-- Invalid or empty `match` objects are validation errors
-- Missing required fields are validation errors
-- Empty example arrays are validation errors
+- parsing should report all discovered schema issues in one run
+- invalid matcher combinations are validation errors
+- invalid directive payloads are validation errors
+- missing examples are validation errors
+- empty or ambiguous rules are validation errors
 
-The goal is to make rule authoring reviewable and safe before runtime.
+## 10. Out Of Scope
 
-## 7. What v1 Does Not Support
+The following remain out of scope for the target initial model:
 
-The following are intentionally out of scope for v1:
-
-- `allow` rules
-- explicit exception clauses such as `except` or `unless`
-- rule priority fields
-- file includes or remote rule packs
-- structured message metadata
-- custom parser plugins or external matcher hooks
-
-If these capabilities are needed later, they should be added as new schema
-features rather than inferred from v1 fields.
+- arbitrary shell templating
+- user-defined rewrite plugins
+- implicit multi-step rewrite pipelines within one rule
+- remote includes or hosted policy packs

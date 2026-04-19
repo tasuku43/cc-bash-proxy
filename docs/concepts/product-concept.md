@@ -1,56 +1,105 @@
 ---
-title: "Product Concept: Declarative Command Policy Guard"
-status: implemented
-date: 2026-04-18
+title: "Product Concept: Invocation Policy Proxy"
+status: proposed
+date: 2026-04-19
 ---
 
 # Product Concept
 
 ## 1. Purpose
 
-This document defines the product-level purpose of `cmdproxy`: the problem it
-solves, who it is for, and what value it should deliver.
+This document defines the target product concept for `cmdproxy`.
+
+`cmdproxy` is not primarily a command blocker. It is a local policy proxy that
+ensures approved CLIs are invoked in organization-approved ways before a
+downstream permission system evaluates the request.
 
 ## 2. Problem
 
-Command execution policies for AI agents and shells are often implemented as
-ad-hoc shell scripts. That approach is fast to start with, but it tends to
-degrade over time:
+In AI-assisted command execution, many operational mistakes come from invocation
+drift rather than raw capability drift.
 
-1. Rules become hard to review and reason about
-2. Small edits can silently widen what is allowed
-3. The same policy is duplicated across Claude Code, shell hooks, and CI
-4. Users get inconsistent deny messages depending on runtime integration
+Typical failures look like:
 
-As a result, policy enforcement becomes fragile precisely where predictable
-behavior is most important.
+1. the right CLI invoked with the wrong credential shape
+2. the right CLI invoked with an unsafe flag or wrapper
+3. the right CLI invoked in a way that defeats the caller's permission intent
+4. a shell wrapper causing the true command shape to become opaque
 
-## 3. Primary Persona
+Permission systems and sandboxes often operate too low in the stack to express
+these rules clearly. They can tell that `aws`, `git`, or `kubectl` ran, but not
+whether the invocation respected the team's calling conventions.
 
-**Operators of AI-assisted command execution**
+## 3. Product Thesis
 
-- Use AI agents, shells, or CI that can trigger shell commands
-- Need a local policy layer before command execution
-- Want policies to be reviewable, testable, and portable across runtimes
-- Prefer a small standalone CLI over runtime-specific shell glue
+`cmdproxy` should preserve permission intent by normalizing or rejecting CLI
+invocations before they reach the caller's final allow / ask / deny layer.
 
-## 4. Operating Context
+The key design idea is:
 
-- `cmdproxy` runs as a local CLI, usually from a hook
-- The caller provides stdin JSON describing an attempted command execution
-- v1 evaluates command strings only; it does not inspect file writes, network
-  fetches, or MCP calls
-- The same rules should work across Claude Code, shell hooks, and CI
+- `CLAUDE.md` or equivalent docs teach the preferred invocation shape
+- `cmdproxy` enforces or normalizes that invocation shape
+- the downstream runtime keeps final permission authority
+
+## 4. Primary Persona
+
+**Operators of AI-agent shell execution**
+
+- run Claude Code, shell hooks, CI wrappers, or similar systems
+- want consistent invocation conventions for approved CLIs
+- want to reduce accidental permission prompts caused by malformed command shape
+- need a reviewable local tool rather than ad-hoc shell glue
 
 ## 5. Core Value Proposition
 
-`cmdproxy` should let users define command-deny policies declaratively and
-verify those policies before rollout, while providing deterministic runtime
-behavior when a command is denied.
+`cmdproxy` should make approved commands conform to policy-approved invocation
+shape so downstream permission systems keep their intended meaning.
 
-## 6. Non-goals
+That value appears in three concrete ways:
 
-1. Generating policies from natural language or LLM transcripts
-2. Acting as a general authorization framework for all tool actions
-3. Providing dashboards, telemetry products, or hosted policy management
-4. Replacing runtime-specific integrations with a full adapter ecosystem in v1
+1. **Canonicalization**
+   Rewrite valid-but-noncanonical invocations into the approved form.
+2. **Intent Preservation**
+   Prevent wrapper and flag usage from weakening caller-side permission rules.
+3. **Reviewability**
+   Keep invocation policy declarative, testable, and portable across runtimes.
+
+## 6. Operating Model
+
+`cmdproxy` runs as a local CLI in front of command execution.
+
+- the caller provides a requested invocation, usually as a raw command string
+- `cmdproxy` parses that invocation internally
+- ordered rules apply directives such as `rewrite` or `reject`
+- the resulting invocation is either passed downstream or rejected
+
+The mental model is closer to `nginx` for CLI invocations than to a deny-list
+filter.
+
+## 7. Directive Model
+
+The target directive model is:
+
+- `rewrite`: transform an invocation into a canonical, policy-approved form
+- `reject`: stop an invocation that must not pass through unchanged
+- implicit `pass`: if nothing matches, forward the original invocation
+
+The primary long-term behavior is `rewrite`, not `reject`.
+
+Initial rewrite primitives should stay narrow and typed. The first useful
+examples are:
+
+- `unwrap_shell_dash_c`
+- `move_flag_to_env`
+
+These primitives are intended as policy-preserving canonicalization, not as
+free-form command templating.
+
+## 8. Non-goals
+
+1. Replacing downstream permission engines with a full authorization system
+2. Acting as a general shell interpreter or full shell AST executor
+3. Providing arbitrary command macros or free-form text transformation
+4. Hosting policy centrally as a network control plane
+5. Solving every low-level escape path that should instead be handled by
+   sandboxing or runtime permissions

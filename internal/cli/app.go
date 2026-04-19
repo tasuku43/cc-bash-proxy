@@ -9,16 +9,16 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tasuku43/cmdproxy/internal/config"
 	"github.com/tasuku43/cmdproxy/internal/doctor"
-	"github.com/tasuku43/cmdproxy/internal/engine"
+	"github.com/tasuku43/cmdproxy/internal/domain/policy"
 	"github.com/tasuku43/cmdproxy/internal/input"
-	"github.com/tasuku43/cmdproxy/internal/rule"
 )
 
 const (
-	exitAllow = 0
-	exitError = 1
-	exitDeny  = 2
+	exitAllow  = 0
+	exitError  = 1
+	exitReject = 2
 )
 
 type Streams struct {
@@ -109,9 +109,9 @@ func runTest(args []string, streams Streams, env Env) int {
 		writeCommandHelp(streams.Stderr, "test")
 		return exitError
 	}
-	loaded := rule.LoadEffective(env.Cwd, env.Home, env.XDGConfigHome)
+	loaded := config.LoadEffective(env.Home, env.XDGConfigHome)
 	if len(loaded.Errors) > 0 {
-		for _, msg := range rule.ErrorStrings(loaded.Errors) {
+		for _, msg := range policy.ErrorStrings(loaded.Errors) {
 			writeErr(streams.Stderr, msg)
 		}
 		return exitError
@@ -144,7 +144,7 @@ func runDoctor(args []string, streams Streams, env Env) int {
 		writeCommandHelp(streams.Stderr, "doctor")
 		return exitError
 	}
-	loaded := rule.LoadEffective(env.Cwd, env.Home, env.XDGConfigHome)
+	loaded := config.LoadEffective(env.Home, env.XDGConfigHome)
 	report := doctor.Run(loaded, env.Home)
 
 	if format == "json" {
@@ -210,35 +210,54 @@ func runInit(args []string, streams Streams, env Env) int {
 }
 
 func evaluateRequest(req input.ExecRequest, format string, streams Streams, env Env) int {
-	loaded := rule.LoadEffectiveForEval(env.Home, env.XDGConfigHome, env.XDGCacheHome)
+	loaded := config.LoadEffectiveForEval(env.Home, env.XDGConfigHome, env.XDGCacheHome)
 	if len(loaded.Errors) > 0 {
-		return emitError(streams, format, "invalid_config", strings.Join(rule.ErrorStrings(loaded.Errors), "; "))
+		return emitError(streams, format, "invalid_config", strings.Join(policy.ErrorStrings(loaded.Errors), "; "))
 	}
 
-	decision, err := engine.Evaluate(loaded.Rules, req)
+	decision, err := policy.Evaluate(loaded.Rules, req.Command)
 	if err != nil {
 		return emitError(streams, format, "runtime_error", err.Error())
 	}
-	if decision.Allowed {
+	if decision.Outcome == "pass" {
 		if format == "json" {
-			_ = json.NewEncoder(streams.Stdout).Encode(map[string]any{"decision": "allow"})
+			_ = json.NewEncoder(streams.Stdout).Encode(map[string]any{
+				"decision": "pass",
+				"command":  decision.Command,
+			})
+		}
+		return exitAllow
+	}
+
+	if decision.Outcome == "rewrite" {
+		if format == "json" {
+			payload := map[string]any{
+				"decision":         "rewrite",
+				"rule_id":          decision.Rule.ID,
+				"command":          decision.Command,
+				"original_command": decision.OriginalCommand,
+				"source":           decision.Rule.Source,
+			}
+			_ = json.NewEncoder(streams.Stdout).Encode(payload)
+		} else {
+			fmt.Fprintln(streams.Stdout, decision.Command)
 		}
 		return exitAllow
 	}
 
 	if format == "json" {
 		payload := map[string]any{
-			"decision": "deny",
+			"decision": "reject",
 			"rule_id":  decision.Rule.ID,
-			"message":  decision.Rule.Message,
+			"message":  decision.Rule.RejectMessage(),
 			"command":  decision.Command,
 			"source":   decision.Rule.Source,
 		}
 		_ = json.NewEncoder(streams.Stdout).Encode(payload)
 	} else {
-		fmt.Fprintf(streams.Stderr, "[%s] %s\n", decision.Rule.ID, decision.Rule.Message)
+		fmt.Fprintf(streams.Stderr, "[%s] %s\n", decision.Rule.ID, decision.Rule.RejectMessage())
 	}
-	return exitDeny
+	return exitReject
 }
 
 func emitError(streams Streams, format string, code string, message string) int {

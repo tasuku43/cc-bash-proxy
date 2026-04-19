@@ -1,39 +1,29 @@
 ---
 title: "cmdproxy check"
-status: implemented
-date: 2026-04-18
+status: proposed
+date: 2026-04-19
 ---
 
 # cmdproxy check
 
 ## Purpose
 
-`cmdproxy check` evaluates a single command string interactively without
-requiring stdin JSON from an external hook.
+`cmdproxy check` evaluates a single invocation interactively without requiring
+stdin JSON from an external hook.
 
-## Relationship to `eval`
+## Relationship To `eval`
 
-`cmdproxy check` is a convenience wrapper over the same evaluation logic used by
-`cmdproxy eval`.
+`cmdproxy check` is the interactive convenience wrapper over the same directive
+application logic used by `cmdproxy eval`.
 
-- It accepts a command string as a CLI argument or flag
-- It constructs the canonical execution input internally
-- It applies the same config loading and first-match deny logic
-- It uses the same output contract and exit codes as `eval`
+- it accepts a command string as CLI input
+- it constructs the canonical execution request internally
+- it applies the same parse, match, and directive flow
+- it emits the same pass / rewrite / reject / error outcomes
 
 ## Use Cases
 
 - ad-hoc debugging while authoring rules
-- reproducing a deny decision outside the hook runtime
-- confirming which rule ID would fire for a candidate command
-
-## Output
-
-By default, `cmdproxy check` should present the same decision shape as
-`cmdproxy eval`.
-
-- allow: no output, exit `0`
-- deny: human-readable stderr, exit `2`
-- error: human-readable stderr, exit `1`
-
-JSON output support should mirror `eval` when `--format json` is used.
+- checking whether a command would be rewritten
+- confirming whether a command would be rejected
+- observing the canonicalized form before relying on Claude Code hooks

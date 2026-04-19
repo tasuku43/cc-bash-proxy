@@ -1,89 +1,120 @@
 ---
 title: "Evaluation Model"
-status: implemented
-date: 2026-04-18
+status: proposed
+date: 2026-04-19
 ---
 
 # Evaluation Model
 
 ## 1. Scope
 
-This document defines how `cmdproxy` v1 evaluates input against configured
-rules and selects a deny decision.
+This document defines the target evaluation model for `cmdproxy`.
+
+`cmdproxy` evaluates a requested CLI invocation against ordered rules and
+applies the first matching directive.
 
 ## 2. Rule Model
 
-v1 uses a deny-only rule model.
+The target model is directive-driven rather than deny-only.
 
-- A rule contains either a structured `match` predicate or a regular
-  expression `pattern`, plus a deny message
-- If a rule matches the command string, the command is denied
-- If no rule matches, the command is allowed
-- v1 does not support allow rules, explicit exceptions, or rule priority
+- a rule contains a matcher and exactly one directive
+- supported directives are `rewrite` and `reject`
+- if no rule matches, the invocation is passed through unchanged
 
-This keeps the runtime contract small and deterministic. More expressive policy
-features are post-v1 work.
+This yields three runtime outcomes:
 
-`cmdproxy` keeps the caller contract simple: callers pass a raw command string.
-Inside `cmdproxy`, predicate-based rules are evaluated against an internal
-parsed representation of that command string.
+- `pass`: no match, original invocation forwarded
+- `rewrite`: matched and normalized into a canonical form
+- `reject`: matched and blocked
 
-That internal parsing may unwrap a small set of common launcher-style wrappers
-before matcher evaluation, such as `env`, `command`, `exec`, `sudo`, `nohup`,
-`timeout`, and `busybox sh`. This is intentionally heuristic rather than a full
-shell AST.
+## 3. Caller Contract
 
-## 3. Supported Input
+`cmdproxy` keeps caller input intentionally simple.
 
-`cmdproxy eval` accepts only execution input.
+- the caller provides a requested command invocation
+- the primary external form is still a raw command string for `exec`
+- internal parsing and normalization complexity stays inside `cmdproxy`
 
-- Generic input:
-  - `action` must be `"exec"`
-  - `command` must be a non-empty string
-- Claude Code adapter input:
-  - `tool_name` must be `"Bash"`
-  - `tool_input.command` must be a non-empty string
+The caller should not need to understand the internal matcher model.
 
-If input does not conform to one of these shapes, evaluation fails with an
-error. v1 does not silently allow unknown action types.
+## 4. Internal Normalization
 
-## 4. Configuration Source
+Inside `cmdproxy`, the raw command string is normalized into a parsed
+invocation model that may include:
 
-v1 evaluates rules from a single user-wide configuration file:
+- environment assignments
+- executable basename
+- argument vector
+- subcommand
+- a small set of unwrapped launcher-style wrappers
+
+Wrapper unwrapping is heuristic and intentionally limited. It may cover common
+forms such as `env`, `command`, `exec`, `sudo`, `nohup`, `timeout`, and
+`busybox sh`, but it is not a full shell AST.
+
+## 5. Configuration Source
+
+The current target config location is a single user-wide file:
 
 - `$XDG_CONFIG_HOME/cmdproxy/cmdproxy.yml`
 - `~/.config/cmdproxy/cmdproxy.yml` when `XDG_CONFIG_HOME` is not set
 
 Within that file, source order is preserved.
 
-## 5. Evaluation Order
+## 6. Evaluation Order
 
-The evaluation order is fixed and deterministic.
+Evaluation order is fixed and deterministic.
 
-1. Load the user-wide config file if present
-2. Preserve rule source order
-3. Evaluate rules in that order
-4. Select the first matching rule
+1. Load the effective config file
+2. Preserve rule order
+3. Parse and normalize the input invocation
+4. Evaluate rules in order
+5. Apply the first matching directive
+6. If nothing matches, pass the original invocation
 
-The first matching rule is the decision rule. Later matching rules are ignored
-for the purpose of the runtime deny decision.
+## 7. Rewrite Semantics
 
-## 6. Rule Identity
+`rewrite` is policy-preserving canonicalization, not arbitrary transformation.
 
-Rule IDs must be unique within the effective configuration file.
+Target properties:
 
-- Duplicate IDs within a file are errors
+- deterministic
+- local to invocation structure
+- safer or more canonical than the original form
+- suitable for downstream permission evaluation
 
-v1 does not define override semantics through repeated IDs.
+Examples:
 
-## 7. Consequences of First-Match Selection
+- move a flag value into a sanctioned environment variable
+- unwrap `bash -c 'single command'` into the direct command form
+- remove a wrapper that obscures the effective executable
+
+The currently implemented rewrite primitives are:
+
+- `rewrite.move_flag_to_env`
+- `rewrite.unwrap_shell_dash_c`
+
+If a rewrite directive matches but cannot safely transform the invocation, the
+default target behavior is **no-op pass**, not implicit reject.
+
+## 8. Reject Semantics
+
+`reject` is reserved for invocation shapes that must not pass through unchanged.
+
+Typical examples:
+
+- wrappers that destroy permission intent and cannot be safely normalized
+- unsafe shell payloads that cannot be unwrapped into a single direct command
+- invocation forms that a team wants to forbid regardless of downstream allow
+  settings
+
+## 9. Consequences Of First-Match Selection
 
 Because first-match selection is part of the contract:
 
-- Runtime deny messages are stable for a given config set
-- Tests can assert the selected rule ID deterministically
-- Rule order is a meaningful part of configuration behavior
+- rule order is meaningful
+- rewrite chains are explicit rather than implicit
+- tests can deterministically assert the applied directive
+- one rule can shadow later rules
 
-This also means one rule can shadow a later rule. Shadowing is not a runtime
-error in v1, but diagnostic tooling should be able to report likely shadowing
-as a warning.
+Shadowing remains a diagnostic concern rather than a runtime error.

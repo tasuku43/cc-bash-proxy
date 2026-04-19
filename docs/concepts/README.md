@@ -1,9 +1,3 @@
----
-title: "Concept Docs Index"
-status: implemented
-date: 2026-04-18
----
-
 # Concepts
 
 This directory stores product-level concept documents for `cmdproxy`.

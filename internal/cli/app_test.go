@@ -116,7 +116,8 @@ func TestRunEvalJSONDeny(t *testing.T) {
 rules:
   - id: no-git-dash-c
     pattern: '^\s*git\s+-C\b'
-    message: "git -C is blocked. Change into the target directory and rerun the command."
+    reject:
+      message: "git -C is blocked. Change into the target directory and rerun the command."
     block_examples: ["git -C foo status"]
     allow_examples: ["git status"]
 `)
@@ -135,7 +136,78 @@ rules:
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("json error: %v", err)
 	}
-	if payload["decision"] != "deny" {
+	if payload["decision"] != "reject" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload["message"] != "git -C is blocked. Change into the target directory and rerun the command." {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestRunEvalJSONRewrite(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `version: 1
+rules:
+  - id: unwrap-shell-dash-c
+    match:
+      command_in: ["bash", "sh"]
+      args_contains: ["-c"]
+    rewrite:
+      unwrap_shell_dash_c: true
+    block_examples: ["bash -c 'git status'"]
+    allow_examples: ["bash script.sh"]
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"eval", "--format", "json"}, Streams{
+		Stdin:  strings.NewReader(`{"action":"exec","command":"bash -c 'git status'"}`),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v", err)
+	}
+	if payload["decision"] != "rewrite" || payload["command"] != "git status" {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestRunEvalJSONMoveFlagToEnvRewrite(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `version: 1
+rules:
+  - id: aws-profile-to-env
+    match:
+      command: aws
+      args_contains: ["--profile"]
+    rewrite:
+      move_flag_to_env:
+        flag: "--profile"
+        env: "AWS_PROFILE"
+    block_examples: ["aws --profile read-only-profile s3 ls"]
+    allow_examples: ["AWS_PROFILE=read-only-profile aws s3 ls"]
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"eval", "--format", "json"}, Streams{
+		Stdin:  strings.NewReader(`{"action":"exec","command":"aws --profile read-only-profile s3 ls"}`),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v", err)
+	}
+	if payload["decision"] != "rewrite" || payload["command"] != "AWS_PROFILE=read-only-profile aws s3 ls" {
 		t.Fatalf("payload = %+v", payload)
 	}
 }
@@ -313,7 +385,7 @@ func TestRunCheckFullGuardDenyCases(t *testing.T) {
 			if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 				t.Fatalf("json error: %v", err)
 			}
-			if payload.Decision != "deny" || payload.RuleID != tt.wantRuleID {
+			if payload.Decision != "reject" || payload.RuleID != tt.wantRuleID {
 				t.Fatalf("payload = %+v", payload)
 			}
 		})
@@ -351,7 +423,7 @@ func TestRunCheckFullGuardAllowCases(t *testing.T) {
 			if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 				t.Fatalf("json error: %v", err)
 			}
-			if payload["decision"] != "allow" {
+			if payload["decision"] != "pass" {
 				t.Fatalf("payload = %+v", payload)
 			}
 		})

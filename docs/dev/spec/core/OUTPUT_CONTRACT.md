@@ -1,67 +1,75 @@
 ---
 title: "Output Contract"
-status: implemented
-date: 2026-04-18
+status: proposed
+date: 2026-04-19
 ---
 
 # Output Contract
 
 ## 1. Scope
 
-This document defines exit codes and output behavior for `cmdproxy eval` v1.
+This document defines the target output contract for the main hook entrypoint of
+`cmdproxy`.
 
-## 2. Exit Codes
+The command name may remain `eval` temporarily, but the contract below is for
+the directive-driven model rather than the earlier deny-only model.
 
-`cmdproxy eval` uses the following process exit codes:
+## 2. Runtime Outcomes
 
-- `0`: allow
-- `2`: deny
-- `1`: error
+The target runtime outcomes are:
 
-`deny` and `error` are intentionally distinct. A policy decision is not the
-same as a malformed input or configuration failure.
+- `pass`: original invocation forwarded unchanged
+- `rewrite`: transformed invocation forwarded
+- `reject`: invocation blocked
+- `error`: invalid input, invalid config, or internal failure
 
 ## 3. Default Output Mode
 
-The default output mode is human-readable text.
+The default human-readable mode should remain concise.
 
-- Allow: no output
-- Deny: write a concise explanation to `stderr`
-- Error: write an error explanation to `stderr`
+- `pass`: normally no output
+- `rewrite`: optional concise trace or no output, depending on caller needs
+- `reject`: explanation to `stderr`
+- `error`: explanation to `stderr`
 
-v1 should avoid writing human-readable decision text to `stdout` so callers can
-use `stdout` safely in scripts.
+## 4. Structured Output Mode
 
-## 4. Deny Output Requirements
+The structured output mode should expose the directive result explicitly.
 
-In default human-readable mode, a deny response must include:
+Target JSON shape:
 
-- The selected `rule_id`
-- The configured deny `message`
-
-The deny output may also include the evaluated command and source file path when
-that adds useful context, but `rule_id` and `message` are the minimum contract.
-
-## 5. JSON Output Mode
-
-`cmdproxy eval --format json` emits a single JSON object describing the result.
-
-### Allow payload
+### Pass payload
 
 ```json
 {
-  "decision": "allow"
+  "decision": "pass",
+  "command": "git status"
 }
 ```
 
-### Deny payload
+### Rewrite payload
 
 ```json
 {
-  "decision": "deny",
-  "rule_id": "no-git-dash-c",
-  "message": "git -C is blocked. Change into the target directory and rerun the command.",
-  "command": "git -C repos/foo status",
+  "decision": "rewrite",
+  "rule_id": "aws-profile-to-env",
+  "command": "AWS_PROFILE=prod aws s3 ls",
+  "original_command": "aws --profile prod s3 ls",
+  "source": {
+    "layer": "user",
+    "path": "/home/alice/.config/cmdproxy/cmdproxy.yml"
+  }
+}
+```
+
+### Reject payload
+
+```json
+{
+  "decision": "reject",
+  "rule_id": "no-shell-dash-c",
+  "message": "shell -c must not pass through unchanged.",
+  "command": "bash -c 'git status && git diff'",
   "source": {
     "layer": "user",
     "path": "/home/alice/.config/cmdproxy/cmdproxy.yml"
@@ -81,12 +89,30 @@ that adds useful context, but `rule_id` and `message` are the minimum contract.
 }
 ```
 
-## 6. Error Classes
+## 5. Exit Codes
 
-v1 error payloads should distinguish at least these classes:
+The target exit-code model should distinguish runtime errors from policy
+results, but it should not force `rewrite` to look like a hard deny.
 
-- `invalid_input`: stdin JSON shape is unsupported or incomplete
-- `invalid_config`: YAML parsing or schema validation failed
-- `runtime_error`: unexpected internal failure
+The currently implemented mapping is:
 
-Exact wording may change, but the top-level error class should remain stable.
+- `pass`: exit `0`
+- `rewrite`: exit `0`
+- `reject`: exit `2`
+- `error`: exit `1`
+
+The longer-term semantics remain:
+
+- success path for `pass`
+- success path for `rewrite`
+- distinct non-success path for `reject`
+- distinct non-success path for `error`
+
+If caller integrations constrain this shape, the wrapper contract may need an
+adapter-specific encoding.
+
+## 6. Integration Note
+
+The central design goal is that downstream systems such as Claude Code can
+evaluate permissions against the canonicalized invocation, not only against the
+original malformed one.
