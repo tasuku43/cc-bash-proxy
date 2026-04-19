@@ -98,6 +98,16 @@ type Decision struct {
 	Rule            *Rule
 	Command         string
 	OriginalCommand string
+	Trace           []TraceStep
+}
+
+type TraceStep struct {
+	RuleID   string `json:"rule_id"`
+	Action   string `json:"action"`
+	From     string `json:"from,omitempty"`
+	To       string `json:"to,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Continue bool   `json:"continue,omitempty"`
 }
 
 const maxRewritePasses = 4
@@ -113,6 +123,7 @@ func NewRule(spec RuleSpec, src Source) Rule {
 func Evaluate(rules []Rule, command string) (Decision, error) {
 	current := command
 	var lastRewriteRule *Rule
+	trace := []TraceStep{}
 	for pass := 0; pass < maxRewritePasses; pass++ {
 		restarted := false
 		for i := range rules {
@@ -128,6 +139,14 @@ func Evaluate(rules []Rule, command string) (Decision, error) {
 				if !ok {
 					continue
 				}
+				step := TraceStep{
+					RuleID:   rules[i].ID,
+					Action:   "rewrite",
+					From:     current,
+					To:       rewritten,
+					Continue: rules[i].Rewrite.Continue,
+				}
+				trace = append(trace, step)
 				if rules[i].Rewrite.Continue {
 					if rewritten == current {
 						return Decision{}, fmt.Errorf("rewrite rule %s produced no-op continue", rules[i].ID)
@@ -137,17 +156,23 @@ func Evaluate(rules []Rule, command string) (Decision, error) {
 					restarted = true
 					break
 				}
-				return Decision{Outcome: "rewrite", Rule: &rules[i], Command: rewritten, OriginalCommand: command}, nil
+				return Decision{Outcome: "rewrite", Rule: &rules[i], Command: rewritten, OriginalCommand: command, Trace: trace}, nil
 			}
-			return Decision{Outcome: "reject", Rule: &rules[i], Command: current, OriginalCommand: command}, nil
+			trace = append(trace, TraceStep{
+				RuleID:  rules[i].ID,
+				Action:  "reject",
+				From:    current,
+				Message: rules[i].RejectMessage(),
+			})
+			return Decision{Outcome: "reject", Rule: &rules[i], Command: current, OriginalCommand: command, Trace: trace}, nil
 		}
 		if restarted {
 			continue
 		}
 		if current != command {
-			return Decision{Outcome: "rewrite", Rule: lastRewriteRule, Command: current, OriginalCommand: command}, nil
+			return Decision{Outcome: "rewrite", Rule: lastRewriteRule, Command: current, OriginalCommand: command, Trace: trace}, nil
 		}
-		return Decision{Outcome: "pass", Command: current, OriginalCommand: command}, nil
+		return Decision{Outcome: "pass", Command: current, OriginalCommand: command, Trace: trace}, nil
 	}
 	return Decision{}, fmt.Errorf("rewrite evaluation exceeded %d passes", maxRewritePasses)
 }

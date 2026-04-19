@@ -69,6 +69,9 @@ func TestEvaluateRewriteRule(t *testing.T) {
 	if got.Outcome != "rewrite" || got.Command != "git status" {
 		t.Fatalf("got %+v", got)
 	}
+	if len(got.Trace) != 1 || got.Trace[0].RuleID != "unwrap-shell-dash-c" || got.Trace[0].Action != "rewrite" {
+		t.Fatalf("trace = %+v", got.Trace)
+	}
 }
 
 func TestEvaluateRewriteContinueReevaluatesFromTop(t *testing.T) {
@@ -110,6 +113,9 @@ func TestEvaluateRewriteContinueReevaluatesFromTop(t *testing.T) {
 	}
 	if got.Outcome != "reject" || got.Rule == nil || got.Rule.ID != "no-git-dash-c" {
 		t.Fatalf("got %+v", got)
+	}
+	if len(got.Trace) != 2 || got.Trace[0].RuleID != "unwrap-shell-dash-c" || got.Trace[1].RuleID != "no-git-dash-c" {
+		t.Fatalf("trace = %+v", got.Trace)
 	}
 }
 

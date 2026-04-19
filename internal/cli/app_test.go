@@ -198,8 +198,19 @@ func TestRunHookClaudeRewrite(t *testing.T) {
 	if hookOut["permissionDecision"] != "allow" {
 		t.Fatalf("payload = %+v", payload)
 	}
+	if payload["systemMessage"] != "cmdproxy: rewrote [unwrap-shell-dash-c] -> git status" {
+		t.Fatalf("payload = %+v", payload)
+	}
 	updatedInput, ok := hookOut["updatedInput"].(map[string]any)
 	if !ok || updatedInput["command"] != "git status" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	cmdproxyOut, ok := payload["cmdproxy"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %+v", payload)
+	}
+	trace, ok := cmdproxyOut["trace"].([]any)
+	if !ok || len(trace) != 1 {
 		t.Fatalf("payload = %+v", payload)
 	}
 }
@@ -248,6 +259,17 @@ func TestRunHookClaudeRewriteContinueThenReject(t *testing.T) {
 	if !ok || hookOut["permissionDecision"] != "deny" {
 		t.Fatalf("payload = %+v", payload)
 	}
+	if _, ok := payload["systemMessage"]; ok {
+		t.Fatalf("payload = %+v", payload)
+	}
+	cmdproxyOut, ok := payload["cmdproxy"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %+v", payload)
+	}
+	trace, ok := cmdproxyOut["trace"].([]any)
+	if !ok || len(trace) != 2 {
+		t.Fatalf("payload = %+v", payload)
+	}
 }
 
 func TestRunHookClaudeMoveFlagToEnvRewrite(t *testing.T) {
@@ -284,6 +306,9 @@ func TestRunHookClaudeMoveFlagToEnvRewrite(t *testing.T) {
 	}
 	hookOut, ok := payload["hookSpecificOutput"].(map[string]any)
 	if !ok {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload["systemMessage"] != "cmdproxy: rewrote [aws-profile-to-env] -> AWS_PROFILE=read-only-profile aws s3 ls" {
 		t.Fatalf("payload = %+v", payload)
 	}
 	updatedInput, ok := hookOut["updatedInput"].(map[string]any)
@@ -369,6 +394,67 @@ func TestRunHookClaudeUnwrapWrapperRewrite(t *testing.T) {
 	}
 	updatedInput, ok := hookOut["updatedInput"].(map[string]any)
 	if !ok || updatedInput["command"] != "AWS_PROFILE=dev aws s3 ls" {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestRunHookClaudeWithRTKOptionAppliesFinalRewrite(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `rules:
+  - id: aws-profile-to-env
+    match:
+      command: aws
+      args_prefixes: ["--profile"]
+    rewrite:
+      move_flag_to_env:
+        flag: "--profile"
+        env: "AWS_PROFILE"
+      test:
+        expect:
+          - in: "aws --profile read-only-profile s3 ls"
+            out: "AWS_PROFILE=read-only-profile aws s3 ls"
+        pass: ["AWS_PROFILE=read-only-profile aws s3 ls"]
+`)
+	binDir := t.TempDir()
+	rtkPath := filepath.Join(binDir, "rtk")
+	script := "#!/bin/sh\nif [ \"$1\" = \"rewrite\" ] && [ \"$2\" = \"AWS_PROFILE=read-only-profile aws s3 ls\" ]; then\n  printf 'rtk aws s3 ls\\n'\n  exit 3\nfi\nexit 1\n"
+	if err := os.WriteFile(rtkPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake rtk: %v", err)
+	}
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+oldPath)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"hook", "claude", "--rtk"}, Streams{
+		Stdin:  strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"aws --profile read-only-profile s3 ls"}}`),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v", err)
+	}
+	hookOut, ok := payload["hookSpecificOutput"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload["systemMessage"] != "cmdproxy: rewrote [aws-profile-to-env -> rtk] -> rtk aws s3 ls" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	updatedInput, ok := hookOut["updatedInput"].(map[string]any)
+	if !ok || updatedInput["command"] != "rtk aws s3 ls" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	cmdproxyOut, ok := payload["cmdproxy"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %+v", payload)
+	}
+	trace, ok := cmdproxyOut["trace"].([]any)
+	if !ok || len(trace) != 2 {
 		t.Fatalf("payload = %+v", payload)
 	}
 }
@@ -463,6 +549,9 @@ func TestRunRootHelpMentionsEditingAndTest(t *testing.T) {
 	if !strings.Contains(out, "cmdproxy test") {
 		t.Fatalf("stdout=%q", out)
 	}
+	if !strings.Contains(out, "cmdproxy help config") {
+		t.Fatalf("stdout=%q", out)
+	}
 }
 
 func TestRunTestHelpMentionsMainAuthoringCommand(t *testing.T) {
@@ -477,6 +566,38 @@ func TestRunTestHelpMentionsMainAuthoringCommand(t *testing.T) {
 	}
 	out := stdout.String()
 	if !strings.Contains(out, "main command to run after editing rules") {
+		t.Fatalf("stdout=%q", out)
+	}
+}
+
+func TestRunConfigHelpShowsRuleExamples(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"help", "config"}, Streams{
+		Stdin:  strings.NewReader(""),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, Env{Cwd: t.TempDir(), Home: t.TempDir()})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Rewrite rule example") || !strings.Contains(out, "Reject rule example") {
+		t.Fatalf("stdout=%q", out)
+	}
+}
+
+func TestRunRewriteHelpShowsPrimitives(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"help", "rewrite"}, Streams{
+		Stdin:  strings.NewReader(""),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, Env{Cwd: t.TempDir(), Home: t.TempDir()})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "move_flag_to_env") || !strings.Contains(out, "continue") {
 		t.Fatalf("stdout=%q", out)
 	}
 }

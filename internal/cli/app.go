@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -69,7 +70,12 @@ func runHook(args []string, streams Streams, env Env) int {
 		writeCommandHelp(streams.Stdout, "hook")
 		return exitAllow
 	}
-	if len(args) != 1 || args[0] != "claude" {
+	useRTK := false
+	switch {
+	case len(args) == 1 && args[0] == "claude":
+	case len(args) == 2 && args[0] == "claude" && args[1] == "--rtk":
+		useRTK = true
+	default:
 		writeCommandHelp(streams.Stderr, "hook")
 		return exitError
 	}
@@ -82,7 +88,7 @@ func runHook(args []string, streams Streams, env Env) int {
 	if err != nil {
 		return emitClaudeHookError(streams, "invalid_input", err.Error())
 	}
-	return runClaudeHook(req, streams, env)
+	return runClaudeHook(req, useRTK, streams, env)
 }
 
 func runCheck(args []string, streams Streams, env Env) int {
@@ -208,7 +214,7 @@ func runInit(args []string, streams Streams, env Env) int {
 	}
 
 	fmt.Fprintln(streams.Stdout, "hook snippet:")
-	fmt.Fprintln(streams.Stdout, `{"matcher":"Bash","hooks":[{"type":"command","command":"cmdproxy hook claude"}]}`)
+	fmt.Fprintln(streams.Stdout, `{"matcher":"Bash","hooks":[{"type":"command","command":"cmdproxy hook claude --rtk"}]}`)
 	return exitAllow
 }
 
@@ -275,32 +281,52 @@ func emitDecision(streams Streams, format string, decision policy.Decision) int 
 	return exitReject
 }
 
-func runClaudeHook(req input.ExecRequest, streams Streams, env Env) int {
+func runClaudeHook(req input.ExecRequest, useRTK bool, streams Streams, env Env) int {
 	decision, err := evaluateDecision(req, env)
 	if err != nil {
 		return emitClaudeHookError(streams, "invalid_config", err.Error())
+	}
+	if useRTK && decision.Outcome != "reject" {
+		decision = applyRTKRewrite(decision)
 	}
 
 	switch decision.Outcome {
 	case "pass":
 		return exitAllow
 	case "rewrite":
+		reason := "cmdproxy rewrite applied"
+		if len(decision.Trace) > 1 {
+			reason = "cmdproxy rewrite chain applied"
+		}
 		payload := map[string]any{
+			"systemMessage": buildRewriteSystemMessage(decision),
 			"hookSpecificOutput": map[string]any{
 				"hookEventName":            "PreToolUse",
 				"permissionDecision":       "allow",
-				"permissionDecisionReason": "cmdproxy rewrite: " + decision.Rule.ID,
+				"permissionDecisionReason": reason,
 				"updatedInput":             map[string]any{"command": decision.Command},
+			},
+			"cmdproxy": map[string]any{
+				"outcome": "rewrite",
+				"trace":   decision.Trace,
 			},
 		}
 		_ = json.NewEncoder(streams.Stdout).Encode(payload)
 		return exitAllow
 	case "reject":
+		reason := decision.Rule.RejectMessage()
+		if len(decision.Trace) > 1 {
+			reason = "cmdproxy reject after rewrite chain"
+		}
 		payload := map[string]any{
 			"hookSpecificOutput": map[string]any{
 				"hookEventName":            "PreToolUse",
 				"permissionDecision":       "deny",
-				"permissionDecisionReason": decision.Rule.RejectMessage(),
+				"permissionDecisionReason": reason,
+			},
+			"cmdproxy": map[string]any{
+				"outcome": "reject",
+				"trace":   decision.Trace,
 			},
 		}
 		_ = json.NewEncoder(streams.Stdout).Encode(payload)
@@ -320,6 +346,53 @@ func emitClaudeHookError(streams Streams, code string, message string) int {
 	}
 	_ = json.NewEncoder(streams.Stdout).Encode(payload)
 	return exitAllow
+}
+
+func applyRTKRewrite(decision policy.Decision) policy.Decision {
+	rewritten, ok := runRTKRewrite(decision.Command)
+	if !ok || rewritten == decision.Command {
+		return decision
+	}
+	decision.Trace = append(decision.Trace, policy.TraceStep{
+		RuleID: "rtk",
+		Action: "rewrite",
+		From:   decision.Command,
+		To:     rewritten,
+	})
+	decision.Command = rewritten
+	if decision.Outcome == "pass" {
+		decision.Outcome = "rewrite"
+	}
+	return decision
+}
+
+func runRTKRewrite(command string) (string, bool) {
+	out, err := exec.Command("rtk", "rewrite", command).CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return "", false
+	}
+	rewritten := strings.TrimSpace(string(out))
+	if rewritten == "" || rewritten == command {
+		return "", false
+	}
+	return rewritten, true
+}
+
+func buildRewriteSystemMessage(decision policy.Decision) string {
+	if len(decision.Trace) == 0 {
+		return "cmdproxy: rewrote -> " + decision.Command
+	}
+	ruleIDs := make([]string, 0, len(decision.Trace))
+	for _, step := range decision.Trace {
+		if step.Action != "rewrite" {
+			continue
+		}
+		ruleIDs = append(ruleIDs, step.RuleID)
+	}
+	if len(ruleIDs) == 0 {
+		return "cmdproxy: rewrote -> " + decision.Command
+	}
+	return fmt.Sprintf("cmdproxy: rewrote [%s] -> %s", strings.Join(ruleIDs, " -> "), decision.Command)
 }
 
 func emitError(streams Streams, format string, code string, message string) int {
@@ -368,7 +441,7 @@ Typical workflow:
   2. Add directive tests under rewrite.test or reject.test
   3. Run cmdproxy test
   4. Use cmdproxy check for spot checks
-  5. Let Claude Code call cmdproxy hook claude from PreToolUse
+  5. Let Claude Code call cmdproxy hook claude --rtk from PreToolUse
 
 Usage:
   cmdproxy <command> [flags]
@@ -383,12 +456,15 @@ Commands:
 Help:
   cmdproxy help <command>
   cmdproxy <command> --help
+  cmdproxy help config
+  cmdproxy help rewrite
+  cmdproxy help match
 
 Examples:
   cmdproxy init
-	cmdproxy test
+  cmdproxy test
   cmdproxy check --format json 'git -C repo status'
-  cmdproxy hook claude
+  cmdproxy hook claude --rtk
   cmdproxy doctor --format json
 `)
 }
@@ -457,11 +533,122 @@ Reads stdin JSON and returns Claude Code hook JSON for pass, rewrite, reject,
 or error outcomes.
 
 Usage:
-  cmdproxy hook claude
+  cmdproxy hook claude [--rtk]
+
+Options:
+  --rtk   run "rtk rewrite" once after cmdproxy policy evaluation and return
+          the final rewritten command if it changes
 
 Note:
   You usually do not run this manually. Edit rules and use cmdproxy test or
   cmdproxy check instead.
+`)
+	case "config":
+		fmt.Fprint(w, `cmdproxy help config
+
+Rule files live at ~/.config/cmdproxy/cmdproxy.yml.
+
+Each rule must define:
+  - id
+  - exactly one of pattern or match
+  - exactly one directive: rewrite or reject
+  - directive-local tests under .test.expect and .test.pass
+
+Reject rule example:
+  - id: no-git-dash-c
+    match:
+      command: git
+      args_contains:
+        - "-C"
+    reject:
+      message: "git -C is blocked. Change into the target directory and rerun the command."
+      test:
+        expect:
+          - "git -C repo status"
+        pass:
+          - "git status"
+
+Rewrite rule example:
+  - id: aws-profile-to-env
+    match:
+      command: aws
+      args_prefixes:
+        - "--profile"
+    rewrite:
+      move_flag_to_env:
+        flag: "--profile"
+        env: "AWS_PROFILE"
+      test:
+        expect:
+          - in: "aws --profile read-only-profile s3 ls"
+            out: "AWS_PROFILE=read-only-profile aws s3 ls"
+        pass:
+          - "AWS_PROFILE=read-only-profile aws s3 ls"
+
+For matcher fields, run:
+  cmdproxy help match
+
+For rewrite primitives, run:
+  cmdproxy help rewrite
+`)
+	case "match":
+		fmt.Fprint(w, `cmdproxy help match
+
+Supported match fields:
+  - command: exact executable name
+  - command_in: executable must be one of these names
+  - subcommand: exact first subcommand
+  - args_contains: exact arg tokens that must exist
+  - args_prefixes: arg tokens that must start with these prefixes
+  - env_requires: env vars that must be present
+  - env_missing: env vars that must be absent
+
+Example:
+  match:
+    command: aws
+    args_prefixes:
+      - "--profile"
+
+Pattern is still supported when shell-shape matching is easier than argv
+matching.
+
+Example:
+  pattern: '^\s*cd\s+[^&;|]+\s*(&&|;|\|)'
+`)
+	case "rewrite":
+		fmt.Fprint(w, `cmdproxy help rewrite
+
+Supported rewrite primitives:
+  - unwrap_shell_dash_c: unwrap safe "bash -c 'single command'" payloads
+  - unwrap_wrapper: strip safe wrappers such as env, command, exec, nohup
+  - move_flag_to_env: move a flag value into an env assignment
+  - move_env_to_flag: move an env assignment into a flag
+  - continue: after a successful rewrite, restart evaluation from the top
+
+Example: unwrap shell -c and continue
+  rewrite:
+    unwrap_shell_dash_c: true
+    continue: true
+    test:
+      expect:
+        - in: "bash -c 'aws --profile read-only-profile s3 ls'"
+          out: "aws --profile read-only-profile s3 ls"
+      pass:
+        - "bash script.sh"
+
+Example: move --profile into AWS_PROFILE
+  rewrite:
+    move_flag_to_env:
+      flag: "--profile"
+      env: "AWS_PROFILE"
+    test:
+      expect:
+        - in: "aws --profile read-only-profile s3 ls"
+          out: "AWS_PROFILE=read-only-profile aws s3 ls"
+      pass:
+        - "AWS_PROFILE=read-only-profile aws s3 ls"
+
+Only one rewrite primitive may be set per rule.
 `)
 	default:
 		writeUsage(w)
