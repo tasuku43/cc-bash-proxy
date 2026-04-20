@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   goreleaser:
@@ -22,8 +25,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          check-latest: true
+          go-version: "1.25.8"
           cache: true
 
       - name: Release preflight
@@ -36,15 +38,25 @@ jobs:
           fi
           go vet ./...
           go test ./...
-          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          version: latest
+          version: v2.12.7
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate provenance attestations for release archives
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/checksums.txt
+
+      - name: Generate provenance attestation for checksums.txt
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/checksums.txt
 
       - name: Determine release channel
         id: channel

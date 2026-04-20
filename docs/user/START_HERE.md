@@ -32,6 +32,25 @@ cmdproxy check bash -c 'git status'
 
 5. Register `cmdproxy hook claude` in your hook runner
 
+## Verifying an Installed Binary
+
+If you install `cmdproxy` from a release artifact, verify it before relying on
+it in your command path.
+
+1. Check the downloaded file against `checksums.txt`
+2. Verify the release provenance with GitHub attestation data
+3. Inspect the binary metadata
+4. Run `cmdproxy verify`
+
+Example:
+
+```sh
+shasum -a 256 -c checksums.txt
+gh attestation verify path/to/cmdproxy_<tag>_<os>_<arch>.tar.gz -R tasuku43/cmdguard
+cmdproxy version --format json
+cmdproxy verify --format json
+```
+
 ## Claude Code
 
 For Claude Code, add `cmdproxy hook claude` as a `PreToolUse` Bash hook.
