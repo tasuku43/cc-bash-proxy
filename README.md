@@ -81,10 +81,27 @@ If you also use another Bash hook such as `rtk hook claude`, place
 `cmdproxy hook claude` first so canonicalization and rejection happen before later
 hook-side processing.
 
-## Security
+## Trust & Security
 
 `cmdproxy` can rewrite commands immediately before execution, so users should
 treat it as part of their local execution trust boundary.
+
+To make that trust boundary auditable, this project currently uses:
+
+- protected default branches and required review for security-sensitive changes
+- `CODEOWNERS` on rewrite, hook, config-loading, and policy paths
+- CI checks including `go test`, `go vet`, and `govulncheck`
+- release `checksums.txt` plus GitHub artifact attestations
+- local trust checks via `cmdproxy version`, `cmdproxy doctor`, and
+  `cmdproxy verify`
+- a separately protected Homebrew tap that is treated as part of the delivery
+  path, not as an independent source of truth
+
+The short version is:
+
+- GitHub Releases are the source of truth for binaries
+- checksums and attestations are the integrity signals
+- `cmdproxy verify` is the local trust check for your installed binary and hook wiring
 
 Before trusting an installed binary:
 
@@ -105,8 +122,10 @@ cmdproxy version --format json
 cmdproxy verify --format json
 ```
 
-The broader trust model is documented in
-[docs/concepts/security-trust-model.md](docs/concepts/security-trust-model.md).
+For details, see:
+
+- [SECURITY.md](SECURITY.md)
+- [docs/concepts/security-trust-model.md](docs/concepts/security-trust-model.md)
 
 ## Current Config Shape
 
