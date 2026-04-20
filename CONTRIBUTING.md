@@ -6,7 +6,7 @@ Thanks for contributing.
 
 Requirements:
 
-- Go 1.25+
+- Go 1.25.8+
 - Git
 
 Common commands:

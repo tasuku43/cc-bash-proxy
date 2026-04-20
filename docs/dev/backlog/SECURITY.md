@@ -103,7 +103,7 @@ user-authored rules.
   - Depends: SECURITY-002
   - Serial: no
 
-- [ ] SECURITY-016: Resolve `GO-2026-4602` in release toolchains
+- [x] SECURITY-016: Resolve `GO-2026-4602` in release toolchains
   - What: update the project's Go toolchain baseline and CI / release runners
     so release artifacts are built and scanned with a Go version that includes
     the fix for `GO-2026-4602` (`os`, fixed in Go `1.25.8`).
