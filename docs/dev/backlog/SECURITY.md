@@ -152,7 +152,7 @@ user-authored rules.
   - Depends: SECURITY-002
   - Serial: no
 
-- [ ] SECURITY-014: CI pinning hardening
+- [x] SECURITY-014: CI pinning hardening
   - What: replace floating `@latest` tool installs in CI with pinned versions
     where practical.
   - Specs:
@@ -174,7 +174,7 @@ user-authored rules.
 
 ## P2: Medium-term improvements
 
-- [ ] SECURITY-021: Tap-release trust documentation
+- [x] SECURITY-021: Tap-release trust documentation
   - What: document the trust assumptions for Homebrew tap updates and how they
     relate to signed releases and checksums.
   - Specs:
@@ -183,7 +183,7 @@ user-authored rules.
   - Depends: SECURITY-007
   - Serial: no
 
-- [ ] SECURITY-022: Richer local integrity checks
+- [x] SECURITY-022: Richer local integrity checks
   - What: explore integrity checking for installed hook wiring and expected
     binary path, inspired by `rtk verify`.
   - Specs:

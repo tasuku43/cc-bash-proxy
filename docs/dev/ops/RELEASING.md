@@ -50,6 +50,8 @@ Before a release is considered healthy, the system should guarantee:
    - Linux archives for amd64 and arm64
    - `checksums.txt`
 4. stable tags open a Homebrew formula PR when Homebrew secrets are configured
+5. the Homebrew tap is treated as part of the trusted release path, not as an
+   independent substitute for release checksums and attestations
 
 ## Minimal Human Verification
 
@@ -84,3 +86,12 @@ configured:
 
 Without those secrets, the GitHub Release still completes and Homebrew update
 steps are skipped.
+
+The Homebrew tap is part of the delivery path, so it should inherit the same
+minimum trust controls as the main repository:
+
+- review is required before formula changes merge
+- the tap may auto-merge only the trusted release bot PRs
+- formula changes should have CI validation in the tap repository
+- users should still verify release checksums and attestations against the
+  GitHub Release artifacts that the formula references

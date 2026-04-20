@@ -93,6 +93,8 @@ Before trusting an installed binary:
 3. use `cmdproxy doctor --format json` for broader diagnostics
 4. verify the downloaded artifact checksum against `checksums.txt`
 5. verify release provenance with `gh attestation verify`
+6. if you install via Homebrew, still treat GitHub Releases as the source of
+   truth for checksums and attestations
 
 Example:
 

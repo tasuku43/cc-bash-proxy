@@ -24,6 +24,10 @@ execution path?**
 - fail if Claude Code settings exist but do not point at `cmdproxy hook claude`
 - fail if Claude Code settings use `cmdproxy hook claude` via PATH lookup
   rather than an absolute binary path
+- fail if an absolute Claude Code hook target does not exist or is not
+  executable
+- fail if Claude Code points at a different `cmdproxy` binary than the one
+  currently being verified
 
 It should not require Claude Code to be installed. If no Claude settings file is
 present, that condition should remain informational rather than fatal.

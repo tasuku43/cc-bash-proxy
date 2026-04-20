@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,8 +103,25 @@ func Run(loaded config.Loaded, home string) Report {
 		data, readErr := os.ReadFile(claudeSettings)
 		if readErr == nil && strings.Contains(string(data), "cmdproxy hook claude") && strings.Contains(string(data), "\"matcher\": \"Bash\"") {
 			checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusPass, Message: "Claude Code hook registration detected"})
-			if strings.Contains(string(data), "/cmdproxy hook claude") {
+			hookCommand, absolutePath := extractClaudeHookCommand(string(data))
+			if absolutePath {
 				checks = append(checks, Check{ID: "install.claude-hook-path", Category: "install", Status: StatusPass, Message: "Claude Code hook appears to use an absolute cmdproxy path"})
+				if path, ok := hookBinaryPath(hookCommand); ok {
+					if stat, statErr := os.Stat(path); statErr != nil {
+						checks = append(checks, Check{ID: "install.claude-hook-target", Category: "install", Status: StatusWarn, Message: "Claude Code hook target does not exist: " + path})
+					} else if stat.Mode()&0o111 == 0 {
+						checks = append(checks, Check{ID: "install.claude-hook-target", Category: "install", Status: StatusWarn, Message: "Claude Code hook target is not executable: " + path})
+					} else {
+						checks = append(checks, Check{ID: "install.claude-hook-target", Category: "install", Status: StatusPass, Message: "Claude Code hook target exists and is executable: " + path})
+						if exe, exeErr := os.Executable(); exeErr == nil {
+							if sameExecutable(exe, path) {
+								checks = append(checks, Check{ID: "install.claude-hook-binary-match", Category: "install", Status: StatusPass, Message: "Claude Code hook target matches the running cmdproxy binary"})
+							} else {
+								checks = append(checks, Check{ID: "install.claude-hook-binary-match", Category: "install", Status: StatusWarn, Message: "Claude Code hook targets a different cmdproxy binary than the one being verified"})
+							}
+						}
+					}
+				}
 			} else {
 				checks = append(checks, Check{ID: "install.claude-hook-path", Category: "install", Status: StatusWarn, Message: "Claude Code hook uses PATH lookup; prefer an absolute cmdproxy path"})
 			}
@@ -124,6 +142,59 @@ func HasFailures(report Report) bool {
 		}
 	}
 	return false
+}
+
+func extractClaudeHookCommand(raw string) (string, bool) {
+	var payload any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return "", false
+	}
+	command := findHookCommand(payload)
+	return command, strings.HasPrefix(command, "/")
+}
+
+func findHookCommand(node any) string {
+	switch v := node.(type) {
+	case map[string]any:
+		if command, ok := v["command"].(string); ok && strings.Contains(command, "cmdproxy hook claude") {
+			return command
+		}
+		for _, value := range v {
+			if command := findHookCommand(value); command != "" {
+				return command
+			}
+		}
+	case []any:
+		for _, value := range v {
+			if command := findHookCommand(value); command != "" {
+				return command
+			}
+		}
+	}
+	return ""
+}
+
+func hookBinaryPath(command string) (string, bool) {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return "", false
+	}
+	if strings.HasPrefix(fields[0], "/") {
+		return fields[0], true
+	}
+	return "", false
+}
+
+func sameExecutable(a, b string) bool {
+	left, err := filepath.EvalSymlinks(a)
+	if err != nil {
+		left = a
+	}
+	right, err := filepath.EvalSymlinks(b)
+	if err != nil {
+		right = b
+	}
+	return left == right
 }
 
 func testsPass(rules []policy.Rule) error {
