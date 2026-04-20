@@ -26,7 +26,7 @@ tasks:
   vulncheck:
     desc: Run govulncheck
     cmds:
-      - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
   release:preflight:
     desc: Run pre-release verification checks

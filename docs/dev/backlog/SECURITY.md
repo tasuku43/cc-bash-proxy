@@ -116,7 +116,7 @@ user-authored rules.
   - Depends: SECURITY-004
   - Serial: no
 
-- [ ] SECURITY-012: Release verification guide
+- [x] SECURITY-012: Release verification guide
   - What: document a concrete user workflow for verifying downloaded artifacts,
     checksums, and provenance metadata.
   - Specs:
@@ -126,7 +126,7 @@ user-authored rules.
   - Depends: SECURITY-006
   - Serial: no
 
-- [ ] SECURITY-013: Review checklist for rewrite changes
+- [x] SECURITY-013: Review checklist for rewrite changes
   - What: define a PR checklist for changes that affect rewrite primitives,
     hook output, config loading, or policy evaluation.
   - Specs:

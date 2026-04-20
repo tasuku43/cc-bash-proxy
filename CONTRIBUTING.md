@@ -33,7 +33,7 @@ task release:preflight
 test -z "$(gofmt -l .)"
 go vet ./...
 go test ./...
-go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 ```
 
 ## Security-sensitive Changes
@@ -51,6 +51,7 @@ For those changes, include in the PR:
 - the affected specs or backlog items
 - test evidence
 - any trust-model implications
+- whether release verification or hook wiring behavior changed
 
 ## Pull Requests
 

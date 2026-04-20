@@ -94,6 +94,15 @@ Before trusting an installed binary:
 4. verify the downloaded artifact checksum against `checksums.txt`
 5. verify release provenance with `gh attestation verify`
 
+Example:
+
+```sh
+shasum -a 256 -c checksums.txt
+gh attestation verify path/to/cmdproxy_<tag>_<os>_<arch>.tar.gz -R tasuku43/cmdguard
+cmdproxy version --format json
+cmdproxy verify --format json
+```
+
 The broader trust model is documented in
 [docs/concepts/security-trust-model.md](docs/concepts/security-trust-model.md).
 
