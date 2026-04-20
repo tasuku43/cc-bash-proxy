@@ -193,7 +193,7 @@ user-authored rules.
   - Depends: SECURITY-011
   - Serial: no
 
-- [ ] SECURITY-023: `homebrew-cmdproxy` release-pipeline integration
+- [x] SECURITY-023: `homebrew-cmdproxy` release-pipeline integration
   - What: define and implement the release-path contract between the main
     `cmdproxy` repository and `tasuku43/homebrew-cmdproxy`, so Homebrew formula
     updates are treated as part of the trusted publish pipeline rather than an
@@ -206,7 +206,7 @@ user-authored rules.
   - Depends: SECURITY-006
   - Serial: yes
 
-- [ ] SECURITY-024: `homebrew-cmdproxy` repository protections and CI baseline
+- [x] SECURITY-024: `homebrew-cmdproxy` repository protections and CI baseline
   - What: apply the same minimum trust controls to the tap repository, including
     branch protection, required review, and CI validation for formula changes,
     so a compromised or weakly protected tap cannot undercut signed releases and
