@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/tasuku43/cmdproxy/internal/buildinfo"
-	"github.com/tasuku43/cmdproxy/internal/claude"
 	"github.com/tasuku43/cmdproxy/internal/config"
 	"github.com/tasuku43/cmdproxy/internal/doctor"
 	"github.com/tasuku43/cmdproxy/internal/domain/policy"
@@ -130,22 +129,29 @@ func runTest(args []string, streams Streams, env Env) int {
 
 	report := doctor.Run(loaded, env.Home)
 	for _, check := range report.Checks {
-		if check.ID == "rules.tests-pass" && check.Status == doctor.StatusFail {
+		if check.ID == "tests.pass" && check.Status == doctor.StatusFail {
 			writeErr(streams.Stderr, check.Message)
 			return exitError
 		}
 	}
 
-	ruleCount := len(loaded.Rules)
+	rewriteCount := len(loaded.Pipeline.Rewrite)
+	permissionCount := len(loaded.Pipeline.Permission.Deny) + len(loaded.Pipeline.Permission.Ask) + len(loaded.Pipeline.Permission.Allow)
 	testCount := 0
-	for _, r := range loaded.Rules {
-		if strings.TrimSpace(r.Reject.Message) != "" {
-			testCount += len(r.Reject.Test.Expect) + len(r.Reject.Test.Pass)
-			continue
-		}
-		testCount += len(r.Rewrite.Test.Expect) + len(r.Rewrite.Test.Pass)
+	for _, step := range loaded.Pipeline.Rewrite {
+		testCount += len(step.Test.Expect) + len(step.Test.Pass)
 	}
-	fmt.Fprintf(streams.Stdout, "ok: %d rules, %d tests checked\n", ruleCount, testCount)
+	for _, rule := range loaded.Pipeline.Permission.Deny {
+		testCount += len(rule.Test.Expect) + len(rule.Test.Pass)
+	}
+	for _, rule := range loaded.Pipeline.Permission.Ask {
+		testCount += len(rule.Test.Expect) + len(rule.Test.Pass)
+	}
+	for _, rule := range loaded.Pipeline.Permission.Allow {
+		testCount += len(rule.Test.Expect) + len(rule.Test.Pass)
+	}
+	testCount += len(loaded.Pipeline.Test.Expect)
+	fmt.Fprintf(streams.Stdout, "ok: %d rewrite steps, %d permission rules, %d tests checked\n", rewriteCount, permissionCount, testCount)
 	return exitAllow
 }
 
@@ -204,7 +210,7 @@ func runVerify(args []string, streams Streams, env Env) int {
 				reasons = append(reasons, err.Error())
 				break
 			}
-			if len(rules) > 0 {
+			if len(rules.Rewrite) > 0 || !policy.IsZeroPermissionSpec(rules.Permission) || len(rules.Test.Expect) > 0 {
 				artifactBuilt = true
 			}
 		}
@@ -382,7 +388,7 @@ func evaluateDecision(req input.ExecRequest, env Env) (policy.Decision, error) {
 		}
 	}
 
-	decision, err := policy.Evaluate(loaded.Rules, req.Command)
+	decision, err := policy.Evaluate(loaded.Pipeline, req.Command)
 	if err != nil {
 		return policy.Decision{}, err
 	}
@@ -412,45 +418,22 @@ func ensureVerifiedArtifacts(env Env) error {
 }
 
 func emitDecision(streams Streams, format string, decision policy.Decision) int {
-	if decision.Outcome == "pass" {
-		if format == "json" {
-			_ = json.NewEncoder(streams.Stdout).Encode(map[string]any{
-				"decision": "pass",
-				"command":  decision.Command,
-			})
-		}
-		return exitAllow
-	}
-
-	if decision.Outcome == "rewrite" {
-		if format == "json" {
-			payload := map[string]any{
-				"decision":         "rewrite",
-				"rule_id":          decision.Rule.ID,
-				"command":          decision.Command,
-				"original_command": decision.OriginalCommand,
-				"source":           decision.Rule.Source,
-			}
-			_ = json.NewEncoder(streams.Stdout).Encode(payload)
-		} else {
-			fmt.Fprintln(streams.Stdout, decision.Command)
-		}
-		return exitAllow
-	}
-
 	if format == "json" {
 		payload := map[string]any{
-			"decision": "reject",
-			"rule_id":  decision.Rule.ID,
-			"message":  decision.Rule.RejectMessage(),
-			"command":  decision.Command,
-			"source":   decision.Rule.Source,
+			"decision":         decision.Outcome,
+			"command":          decision.Command,
+			"original_command": decision.OriginalCommand,
+			"message":          decision.Message,
+			"trace":            decision.Trace,
 		}
 		_ = json.NewEncoder(streams.Stdout).Encode(payload)
 	} else {
-		fmt.Fprintf(streams.Stderr, "[%s] %s\n", decision.Rule.ID, decision.Rule.RejectMessage())
+		fmt.Fprintf(streams.Stdout, "%s: %s\n", decision.Outcome, decision.Command)
 	}
-	return exitReject
+	if decision.Outcome == "deny" {
+		return exitReject
+	}
+	return exitAllow
 }
 
 func runClaudeHook(req input.ExecRequest, useRTK bool, streams Streams, env Env) int {
@@ -458,67 +441,37 @@ func runClaudeHook(req input.ExecRequest, useRTK bool, streams Streams, env Env)
 	if err != nil {
 		return emitClaudeHookError(streams, "invalid_config", err.Error())
 	}
-
-	verdict := claude.PermissionDefault
-	shouldEmitVerdict := false
-	if decision.Outcome != "reject" {
-		permissionCommand := decision.Command
-		if decision.Outcome == "rewrite" || useRTK {
-			verdict = claude.CheckCommand(permissionCommand, env.Cwd, env.Home)
-			shouldEmitVerdict = true
-		}
-	}
-	if useRTK && decision.Outcome != "reject" {
+	if useRTK && decision.Outcome != "deny" {
 		decision = applyRTKRewrite(decision)
 	}
 
 	switch decision.Outcome {
-	case "pass":
-		if shouldEmitVerdict && verdict == claude.PermissionDeny {
-			payload := map[string]any{
-				"hookSpecificOutput": map[string]any{
-					"hookEventName":            "PreToolUse",
-					"permissionDecision":       "deny",
-					"permissionDecisionReason": "blocked by Claude Code permission rules",
-				},
-				"cmdproxy": map[string]any{
-					"outcome": "deny",
-				},
-			}
-			_ = json.NewEncoder(streams.Stdout).Encode(payload)
-			return exitAllow
-		}
-		return exitAllow
-	case "rewrite":
-		reason := "cmdproxy rewrite applied"
-		if len(decision.Trace) > 1 {
-			reason = "cmdproxy rewrite chain applied"
-		}
+	case "allow", "ask":
+		reason := "cmdproxy permission evaluated"
 		hookOutput := map[string]any{
 			"hookEventName":            "PreToolUse",
 			"permissionDecisionReason": reason,
-			"updatedInput":             map[string]any{"command": decision.Command},
 		}
-		switch verdict {
-		case claude.PermissionAllow:
+		if decision.Command != req.Command {
+			hookOutput["updatedInput"] = map[string]any{"command": decision.Command}
+		}
+		if decision.Outcome == "allow" {
 			hookOutput["permissionDecision"] = "allow"
-		case claude.PermissionDeny:
-			hookOutput["permissionDecision"] = "deny"
 		}
 		payload := map[string]any{
 			"systemMessage":      buildRewriteSystemMessage(decision),
 			"hookSpecificOutput": hookOutput,
 			"cmdproxy": map[string]any{
-				"outcome": "rewrite",
+				"outcome": decision.Outcome,
 				"trace":   decision.Trace,
 			},
 		}
 		_ = json.NewEncoder(streams.Stdout).Encode(payload)
 		return exitAllow
-	case "reject":
-		reason := decision.Rule.RejectMessage()
-		if len(decision.Trace) > 1 {
-			reason = "cmdproxy reject after rewrite chain"
+	case "deny":
+		reason := decision.Message
+		if strings.TrimSpace(reason) == "" {
+			reason = "cmdproxy denied by policy"
 		}
 		payload := map[string]any{
 			"hookSpecificOutput": map[string]any{
@@ -527,7 +480,7 @@ func runClaudeHook(req input.ExecRequest, useRTK bool, streams Streams, env Env)
 				"permissionDecisionReason": reason,
 			},
 			"cmdproxy": map[string]any{
-				"outcome": "reject",
+				"outcome": "deny",
 				"trace":   decision.Trace,
 			},
 		}
@@ -556,15 +509,12 @@ func applyRTKRewrite(decision policy.Decision) policy.Decision {
 		return decision
 	}
 	decision.Trace = append(decision.Trace, policy.TraceStep{
-		RuleID: "rtk",
 		Action: "rewrite",
+		Name:   "rtk",
 		From:   decision.Command,
 		To:     rewritten,
 	})
 	decision.Command = rewritten
-	if decision.Outcome == "pass" {
-		decision.Outcome = "rewrite"
-	}
 	return decision
 }
 
@@ -589,7 +539,7 @@ func buildRewriteSystemMessage(decision policy.Decision) string {
 		if step.Action != "rewrite" {
 			continue
 		}
-		ruleIDs = append(ruleIDs, step.RuleID)
+		ruleIDs = append(ruleIDs, step.Name)
 	}
 	if len(ruleIDs) == 0 {
 		return "cmdproxy: rewrote -> " + decision.Command
@@ -640,7 +590,7 @@ Declarative, testable command policy for AI-agent shell commands.
 
 Typical workflow:
   1. Edit ~/.config/cmdproxy/cmdproxy.yml
-  2. Add directive tests under rewrite.test or reject.test
+  2. Add rewrite, permission, and E2E tests
   3. Run cmdproxy test
   4. Use cmdproxy check for spot checks
   5. Let Claude Code call cmdproxy hook claude --rtk from PreToolUse
@@ -692,15 +642,16 @@ Typical use:
 	case "test":
 		fmt.Fprint(w, `cmdproxy test
 
-Validate every rule in ~/.config/cmdproxy/cmdproxy.yml.
-This is the main command to run after editing rules.
+Validate the full pipeline in ~/.config/cmdproxy/cmdproxy.yml.
+This is the main command to run after editing policy.
 
 Usage:
   cmdproxy test
 
 What it checks:
-  - every directive test expect case produces the expected result
-  - every directive test pass case remains pass
+  - every rewrite step test expect/pass case
+  - every permission rule test expect/pass case
+  - every top-level E2E test expect case
 
 Typical use:
   $EDITOR ~/.config/cmdproxy/cmdproxy.yml
@@ -722,7 +673,7 @@ Examples:
 	case "doctor":
 		fmt.Fprint(w, `cmdproxy doctor
 
-Inspect config validity, rule quality, and Claude Code hook registration.
+Inspect config validity, pipeline quality, and Claude Code hook registration.
 
 Usage:
   cmdproxy doctor [--format json]
@@ -749,8 +700,8 @@ Examples:
 		fmt.Fprint(w, `cmdproxy hook claude
 
 Claude Code hook entrypoint.
-Reads stdin JSON and returns Claude Code hook JSON for pass, rewrite, reject,
-or error outcomes.
+Reads stdin JSON, evaluates the configured rewrite and permission pipeline, and
+returns Claude Code hook JSON for allow, ask, deny, or error outcomes.
 
 Usage:
   cmdproxy hook claude [--rtk]
@@ -779,44 +730,51 @@ Examples:
 	case "config":
 		fmt.Fprint(w, `cmdproxy help config
 
-Rule files live at ~/.config/cmdproxy/cmdproxy.yml.
+Config files live at ~/.config/cmdproxy/cmdproxy.yml.
 
-Each rule must define:
-  - id
-  - exactly one of pattern or match
-  - exactly one directive: rewrite or reject
-  - directive-local tests under .test.expect and .test.pass
+Top-level sections are:
+  - rewrite: ordered rewrite pipeline
+  - permission: deny / ask / allow buckets
+  - test: end-to-end expect cases
 
-Reject rule example:
-  - id: no-git-dash-c
-    match:
-      command: git
-      args_contains:
-        - "-C"
-    reject:
-      message: "git -C is blocked. Change into the target directory and rerun the command."
-      test:
-        expect:
-          - "git -C repo status"
-        pass:
-          - "git status"
-
-Rewrite rule example:
-  - id: aws-profile-to-env
-    match:
-      command: aws
-      args_prefixes:
-        - "--profile"
-    rewrite:
+Rewrite step example:
+  rewrite:
+    - match:
+        command: aws
+        args_contains:
+          - "--profile"
       move_flag_to_env:
         flag: "--profile"
         env: "AWS_PROFILE"
+      strict: true
+      continue: true
       test:
         expect:
           - in: "aws --profile read-only-profile s3 ls"
             out: "AWS_PROFILE=read-only-profile aws s3 ls"
         pass:
           - "AWS_PROFILE=read-only-profile aws s3 ls"
+
+Permission rule example:
+  permission:
+    allow:
+      - match:
+          command: aws
+          subcommand: sts
+          env_requires:
+            - "AWS_PROFILE"
+        test:
+          expect:
+            - "AWS_PROFILE=read-only-profile aws sts get-caller-identity"
+          pass:
+            - "AWS_PROFILE=read-only-profile aws s3 ls"
+
+E2E test example:
+  test:
+    expect:
+      - in: "aws --profile read-only-profile sts get-caller-identity"
+        rewritten: "AWS_PROFILE=read-only-profile aws sts get-caller-identity"
+        decision: allow
 
 For matcher fields, run:
   cmdproxy help match
@@ -856,32 +814,32 @@ Supported rewrite primitives:
   - unwrap_wrapper: strip safe wrappers such as env, command, exec, nohup
   - move_flag_to_env: move a flag value into an env assignment
   - move_env_to_flag: move an env assignment into a flag
+  - strip_command_path: convert an absolute-path command token into its basename
   - continue: after a successful rewrite, restart evaluation from the top
 
-Example: unwrap shell -c and continue
-  rewrite:
-    unwrap_shell_dash_c: true
-    continue: true
-    test:
-      expect:
-        - in: "bash -c 'aws --profile read-only-profile s3 ls'"
-          out: "aws --profile read-only-profile s3 ls"
-      pass:
-        - "bash script.sh"
+Each rewrite step is an element in the top-level rewrite array and may add an
+optional match block. If match is omitted, the step is considered for every
+command.
 
-Example: move --profile into AWS_PROFILE
+Example:
   rewrite:
-    move_flag_to_env:
-      flag: "--profile"
-      env: "AWS_PROFILE"
-    test:
-      expect:
-        - in: "aws --profile read-only-profile s3 ls"
-          out: "AWS_PROFILE=read-only-profile aws s3 ls"
-      pass:
-        - "AWS_PROFILE=read-only-profile aws s3 ls"
+    - match:
+        command: aws
+        args_contains:
+          - "--profile"
+      move_flag_to_env:
+        flag: "--profile"
+        env: "AWS_PROFILE"
+      strict: true
+      continue: true
+      test:
+        expect:
+          - in: "aws --profile read-only-profile s3 ls"
+            out: "AWS_PROFILE=read-only-profile aws s3 ls"
+        pass:
+          - "AWS_PROFILE=read-only-profile aws s3 ls"
 
-Only one rewrite primitive may be set per rule.
+Each step may set exactly one rewrite primitive.
 `)
 	default:
 		writeUsage(w)
@@ -908,17 +866,20 @@ func userConfigBase(home string, xdgConfigHome string) string {
 	return filepath.Join(home, ".config")
 }
 
-const starterConfig = `rules:
-  - id: no-git-dash-c
-    match:
-      command: git
-      args_contains:
-        - "-C"
-    reject:
+const starterConfig = `permission:
+  deny:
+    - match:
+        command: git
+        args_contains:
+          - "-C"
       message: "git -C is blocked. Change into the target directory and rerun the command."
       test:
         expect:
           - "git -C repos/foo status"
         pass:
           - "git status"
+test:
+  expect:
+    - in: "git -C repos/foo status"
+      decision: deny
 `
