@@ -27,7 +27,7 @@ func TestRunWarnsOnRelaxedRewriteContracts(t *testing.T) {
 		}, policy.Source{}),
 	}
 
-	report := Run(loaded, t.TempDir())
+	report := Run(loaded, "claude", t.TempDir(), t.TempDir())
 	if !hasCheck(report, "rewrite.relaxed-contracts", StatusWarn) {
 		t.Fatalf("checks = %+v", report.Checks)
 	}
@@ -45,7 +45,7 @@ func TestRunPassesWhenPipelineTestsMatch(t *testing.T) {
 			Test: policy.PipelineTestSpec{{In: "git status", Decision: "allow"}},
 		}, policy.Source{}),
 	}
-	report := Run(loaded, t.TempDir())
+	report := Run(loaded, "claude", t.TempDir(), t.TempDir())
 	if !hasCheck(report, "tests.pass", StatusPass) {
 		t.Fatalf("checks = %+v", report.Checks)
 	}

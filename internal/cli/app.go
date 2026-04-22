@@ -12,11 +12,11 @@ import (
 	"strings"
 
 	"github.com/tasuku43/cmdproxy/internal/buildinfo"
-	"github.com/tasuku43/cmdproxy/internal/claude"
 	"github.com/tasuku43/cmdproxy/internal/config"
 	"github.com/tasuku43/cmdproxy/internal/doctor"
 	"github.com/tasuku43/cmdproxy/internal/domain/policy"
 	"github.com/tasuku43/cmdproxy/internal/input"
+	"github.com/tasuku43/cmdproxy/internal/integration"
 )
 
 const (
@@ -76,24 +76,36 @@ func runHook(args []string, streams Streams, env Env) int {
 		return exitAllow
 	}
 	useRTK := false
+	var tool string
 	switch {
-	case len(args) == 1 && args[0] == "claude":
-	case len(args) == 2 && args[0] == "claude" && args[1] == "--rtk":
+	case len(args) == 1:
+		tool = args[0]
+	case len(args) == 2 && args[1] == "--rtk":
+		tool = args[0]
 		useRTK = true
 	default:
 		writeCommandHelp(streams.Stderr, "hook")
 		return exitError
 	}
+	if !integration.Supported(tool) {
+		writeErr(streams.Stderr, "unsupported tool: "+tool)
+		return exitError
+	}
 	raw, err := io.ReadAll(streams.Stdin)
 	if err != nil {
-		return emitClaudeHookError(streams, "runtime_error", err.Error())
+		return emitHookError(tool, streams, "runtime_error", err.Error())
 	}
 
 	req, err := input.Normalize(raw)
 	if err != nil {
-		return emitClaudeHookError(streams, "invalid_input", err.Error())
+		return emitHookError(tool, streams, "invalid_input", err.Error())
 	}
-	return runClaudeHook(req, useRTK, streams, env)
+	switch tool {
+	case integration.ToolClaude:
+		return runClaudeHook(req, useRTK, streams, env)
+	default:
+		return emitHookError(tool, streams, "runtime_error", "unsupported tool")
+	}
 }
 
 func runCheck(args []string, streams Streams, env Env) int {
@@ -121,7 +133,7 @@ func runDoctor(args []string, streams Streams, env Env) int {
 		return exitError
 	}
 	loaded := config.LoadEffective(env.Home, env.XDGConfigHome)
-	report := doctor.Run(loaded, env.Home)
+	report := doctor.Run(loaded, integration.ToolClaude, env.Cwd, env.Home)
 
 	if format == "json" {
 		enc := json.NewEncoder(streams.Stdout)
@@ -148,32 +160,34 @@ func runVerify(args []string, streams Streams, env Env) int {
 		return exitAllow
 	}
 	format, rest, err := parseCommonFlags(args)
-	if err != nil || len(rest) != 0 {
+	if err != nil || len(rest) != 1 {
 		writeCommandHelp(streams.Stderr, "verify")
 		return exitError
 	}
-	loaded := config.LoadEffective(env.Home, env.XDGConfigHome)
-	report := doctor.Run(loaded, env.Home)
+	tool := rest[0]
+	if !integration.Supported(tool) {
+		writeErr(streams.Stderr, "unsupported tool: "+tool)
+		return exitError
+	}
+	loaded := config.LoadEffectiveForTool(env.Cwd, env.Home, env.XDGConfigHome, tool)
+	report := doctor.Run(loaded, tool, env.Cwd, env.Home)
 	info := buildinfo.Read()
-	ok, reasons := verifyStatus(report, info)
+	ok, reasons := verifyStatus(report, info, tool)
 	artifactBuilt := false
 	if ok {
-		for _, src := range config.ConfigPaths(env.Home, env.XDGConfigHome) {
-			rules, err := config.VerifyFileToAllCaches(src, config.HookCacheDirs(env.Home, env.XDGCacheHome), info.Version)
-			if err != nil {
-				ok = false
-				reasons = append(reasons, err.Error())
-				break
-			}
-			if len(rules.Rewrite) > 0 || !policy.IsZeroPermissionSpec(rules.Permission) || len(rules.Test) > 0 {
-				artifactBuilt = true
-			}
+		rules, err := config.VerifyEffectiveToAllCaches(env.Cwd, env.Home, env.XDGConfigHome, env.XDGCacheHome, tool, info.Version)
+		if err != nil {
+			ok = false
+			reasons = append(reasons, err.Error())
+		} else if len(rules.Rewrite) > 0 || !policy.IsZeroPermissionSpec(rules.Permission) || len(rules.Test) > 0 {
+			artifactBuilt = true
 		}
 	}
 
 	if format == "json" {
 		payload := map[string]any{
 			"verified":       ok,
+			"tool":           tool,
 			"build_info":     info,
 			"report":         report,
 			"artifact_built": artifactBuilt,
@@ -190,6 +204,7 @@ func runVerify(args []string, streams Streams, env Env) int {
 		}
 	} else {
 		fmt.Fprintf(streams.Stdout, "cmdproxy %s\n", info.Version)
+		fmt.Fprintf(streams.Stdout, "tool: %s\n", tool)
 		if info.VCSRevision != "" {
 			fmt.Fprintf(streams.Stdout, "vcs.revision: %s\n", info.VCSRevision)
 		} else {
@@ -297,7 +312,7 @@ func runVersion(args []string, streams Streams) int {
 	return exitAllow
 }
 
-func verifyStatus(report doctor.Report, info buildinfo.Info) (bool, []string) {
+func verifyStatus(report doctor.Report, info buildinfo.Info, tool string) (bool, []string) {
 	var reasons []string
 
 	for _, check := range report.Checks {
@@ -305,13 +320,13 @@ func verifyStatus(report doctor.Report, info buildinfo.Info) (bool, []string) {
 			reasons = append(reasons, check.ID+": "+check.Message)
 			continue
 		}
-		if check.ID == "install.claude-registered" && check.Status == doctor.StatusWarn && strings.Contains(check.Message, "settings found but") {
+		if tool == integration.ToolClaude && check.ID == "install.claude-registered" && check.Status == doctor.StatusWarn && strings.Contains(check.Message, "settings found but") {
 			reasons = append(reasons, check.ID+": "+check.Message)
 		}
-		if check.ID == "install.claude-hook-path" && check.Status == doctor.StatusWarn {
+		if tool == integration.ToolClaude && check.ID == "install.claude-hook-path" && check.Status == doctor.StatusWarn {
 			reasons = append(reasons, check.ID+": "+check.Message)
 		}
-		if (check.ID == "install.claude-hook-target" || check.ID == "install.claude-hook-binary-match") && check.Status == doctor.StatusWarn {
+		if tool == integration.ToolClaude && (check.ID == "install.claude-hook-target" || check.ID == "install.claude-hook-binary-match") && check.Status == doctor.StatusWarn {
 			reasons = append(reasons, check.ID+": "+check.Message)
 		}
 	}
@@ -331,11 +346,11 @@ func evaluateRequest(req input.ExecRequest, format string, streams Streams, env 
 }
 
 func evaluateDecision(req input.ExecRequest, env Env) (policy.Decision, error) {
-	loaded := config.LoadEffectiveForHook(env.Home, env.XDGConfigHome, env.XDGCacheHome)
+	loaded := config.LoadEffectiveForHookTool(env.Cwd, env.Home, env.XDGConfigHome, env.XDGCacheHome, integration.ToolClaude)
 	if len(loaded.Errors) > 0 {
 		if shouldAttemptImplicitVerify(loaded.Errors) {
-			if err := ensureVerifiedArtifacts(env); err == nil {
-				loaded = config.LoadEffectiveForHook(env.Home, env.XDGConfigHome, env.XDGCacheHome)
+			if err := ensureVerifiedArtifacts(env, integration.ToolClaude); err == nil {
+				loaded = config.LoadEffectiveForHookTool(env.Cwd, env.Home, env.XDGConfigHome, env.XDGCacheHome, integration.ToolClaude)
 			}
 		}
 		if len(loaded.Errors) > 0 {
@@ -362,14 +377,10 @@ func shouldAttemptImplicitVerify(errs []error) bool {
 	return false
 }
 
-func ensureVerifiedArtifacts(env Env) error {
+func ensureVerifiedArtifacts(env Env, tool string) error {
 	info := buildinfo.Read()
-	for _, src := range config.ConfigPaths(env.Home, env.XDGConfigHome) {
-		if _, err := config.VerifyFileToAllCaches(src, config.HookCacheDirs(env.Home, env.XDGCacheHome), info.Version); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := config.VerifyEffectiveToAllCaches(env.Cwd, env.Home, env.XDGConfigHome, env.XDGCacheHome, tool, info.Version)
+	return err
 }
 
 func emitDecision(streams Streams, format string, decision policy.Decision) int {
@@ -394,9 +405,9 @@ func emitDecision(streams Streams, format string, decision policy.Decision) int 
 func runClaudeHook(req input.ExecRequest, useRTK bool, streams Streams, env Env) int {
 	decision, err := evaluateDecision(req, env)
 	if err != nil {
-		return emitClaudeHookError(streams, "invalid_config", err.Error())
+		return emitHookError(integration.ToolClaude, streams, "invalid_config", err.Error())
 	}
-	decision = applyClaudePermissionBridge(decision, env)
+	decision = integration.ApplyPermissionBridge(integration.ToolClaude, decision, env.Cwd, env.Home)
 	if useRTK && decision.Outcome != "deny" {
 		decision = applyRTKRewrite(decision)
 	}
@@ -443,56 +454,20 @@ func runClaudeHook(req input.ExecRequest, useRTK bool, streams Streams, env Env)
 		_ = json.NewEncoder(streams.Stdout).Encode(payload)
 		return exitAllow
 	default:
-		return emitClaudeHookError(streams, "runtime_error", "unsupported decision outcome")
+		return emitHookError(integration.ToolClaude, streams, "runtime_error", "unsupported decision outcome")
 	}
 }
 
-func emitClaudeHookError(streams Streams, code string, message string) int {
+func emitHookError(tool string, streams Streams, code string, message string) int {
 	payload := map[string]any{
 		"hookSpecificOutput": map[string]any{
 			"hookEventName":            "PreToolUse",
 			"permissionDecision":       "deny",
-			"permissionDecisionReason": "cmdproxy " + code + ": " + message,
+			"permissionDecisionReason": "cmdproxy " + tool + " " + code + ": " + message,
 		},
 	}
 	_ = json.NewEncoder(streams.Stdout).Encode(payload)
 	return exitAllow
-}
-
-func applyClaudePermissionBridge(decision policy.Decision, env Env) policy.Decision {
-	verdict := claude.CheckCommand(decision.Command, env.Cwd, env.Home)
-	switch verdict {
-	case claude.PermissionDeny:
-		decision.Trace = append(decision.Trace, policy.TraceStep{
-			Action:  "permission",
-			Name:    "claude_settings",
-			Effect:  "deny",
-			Message: "Claude settings deny matched during migration",
-		})
-		if strings.TrimSpace(decision.Message) == "" {
-			decision.Message = "blocked by Claude settings migration rule"
-		}
-		decision.Outcome = "deny"
-	case claude.PermissionAllow:
-		decision.Trace = append(decision.Trace, policy.TraceStep{
-			Action:  "permission",
-			Name:    "claude_settings",
-			Effect:  "allow",
-			Message: "Claude settings allow matched during migration",
-		})
-		decision.Outcome = "allow"
-	case claude.PermissionAsk, claude.PermissionDefault:
-		if decision.Outcome != "allow" && decision.Outcome != "deny" {
-			decision.Trace = append(decision.Trace, policy.TraceStep{
-				Action:  "permission",
-				Name:    "claude_settings",
-				Effect:  "ask",
-				Message: "Claude settings require confirmation during migration",
-			})
-			decision.Outcome = "ask"
-		}
-	}
-	return decision
 }
 
 func applyRTKRewrite(decision policy.Decision) policy.Decision {
@@ -585,10 +560,11 @@ Declarative, testable command policy for AI-agent shell commands.
 
 Typical workflow:
   1. Edit ~/.config/cmdproxy/cmdproxy.yml
-  2. Add rewrite, permission, and E2E tests
-  3. Run cmdproxy verify
-  4. Use cmdproxy check for spot checks
+  2. Optionally add .cmdproxy/cmdproxy.yaml in the project
+  3. Add rewrite, permission, and E2E tests
+  4. Run cmdproxy verify claude
   5. Let Claude Code call cmdproxy hook claude --rtk from PreToolUse
+  6. Use cmdproxy check for spot checks
 
 Usage:
   cmdproxy <command> [flags]
@@ -611,7 +587,7 @@ Help:
 Examples:
   cmdproxy init
   cmdproxy check --format json 'git -C repo status'
-  cmdproxy verify --format json
+  cmdproxy verify claude --format json
   cmdproxy version --format json
   cmdproxy hook claude --rtk
   cmdproxy doctor --format json
@@ -658,19 +634,20 @@ Examples:
   cmdproxy doctor --format json
 `)
 	case "verify":
-		fmt.Fprint(w, `cmdproxy verify
+		fmt.Fprint(w, `cmdproxy verify <tool>
 
 Verify the local trust-critical cmdproxy setup.
 This command is stricter than doctor: it fails when the config is broken, when
-configured tests fail, when Claude settings point somewhere unexpected, or when
-build metadata is missing.
+configured tests fail, when the effective global/local tool settings and
+cmdproxy policy disagree with expected E2E outcomes, or when build metadata is
+missing.
 
 Usage:
-  cmdproxy verify [--format json]
+  cmdproxy verify [--format json] <tool>
 
 Examples:
-  cmdproxy verify
-  cmdproxy verify --format json
+  cmdproxy verify claude
+  cmdproxy verify --format json claude
 `)
 	case "hook":
 		fmt.Fprint(w, `cmdproxy hook claude
@@ -706,7 +683,9 @@ Examples:
 	case "config":
 		fmt.Fprint(w, `cmdproxy help config
 
-Config files live at ~/.config/cmdproxy/cmdproxy.yml.
+Config files live at:
+  - ~/.config/cmdproxy/cmdproxy.yml
+  - ./.cmdproxy/cmdproxy.yaml (project-local, optional)
 
 Top-level sections are:
   - rewrite: ordered rewrite pipeline

@@ -1,16 +1,17 @@
 ---
 title: "cmdproxy hook"
 status: proposed
-date: 2026-04-22
+date: 2026-04-23
 ---
 
 # cmdproxy hook
 
 ## Purpose
 
-`cmdproxy hook claude` is the Claude Code hook entrypoint. It reads the
-Claude Code `PreToolUse` Bash payload from stdin, applies the configured
-rewrite and permission pipeline, and emits Claude Code hook JSON on stdout.
+`cmdproxy hook <tool>` is the tool-specific hook entrypoint. In the current
+implementation, `claude` is the supported tool. It reads the tool hook payload
+from stdin, applies the configured rewrite and permission pipeline, and emits
+tool-specific hook JSON on stdout.
 
 ## Input Sources
 
@@ -28,10 +29,17 @@ The current flow is:
 1. Read stdin fully
 2. Parse Claude Code hook JSON
 3. Normalize the Bash command into an invocation request
-4. Load the verified artifact for the effective config
-5. Evaluate the rewrite pipeline
-6. Evaluate permissions on the rewritten command
-7. Emit Claude Code hook JSON:
+4. Resolve global and project-local `cmdproxy` policy for the tool
+5. Resolve global and project-local tool settings for the tool
+6. Load the verified artifact for the effective merged state
+7. Evaluate the rewrite pipeline
+8. Evaluate `cmdproxy` permissions on the rewritten command
+9. Evaluate tool-native permissions for migration and coexistence
+10. Combine both permission sources with:
+   - deny if either side denies
+   - allow if either side allows
+   - ask otherwise
+11. Emit tool hook JSON:
    - `allow`: `permissionDecision: "allow"`
    - `ask`: no `permissionDecision`, so Claude prompts
    - `deny`: `permissionDecision: "deny"`
@@ -50,13 +58,18 @@ The current implementation already supports rewrite outcomes for:
 If a rewrite primitive matches but cannot safely rewrite the invocation,
 evaluation continues with the current command.
 
-## Permission Source Of Truth
+## Permission Coexistence
 
-`cmdproxy` is the source of truth for command permission evaluation.
+`cmdproxy` and tool-native settings coexist during evaluation.
 
-Claude Code `settings.json` is no longer the primary place to express shell
-command permission policy. The Claude hook only receives the final `allow`,
-`ask`, or `deny` result produced by `cmdproxy`.
+`cmdproxy` is responsible for:
+
+- rewrite
+- flexible additional permission rules
+- end-to-end policy tests
+
+Tool-native settings remain part of the effective runtime verdict during
+evaluation and verification.
 
 ## RTK Integration
 
@@ -64,8 +77,11 @@ When `cmdproxy hook claude --rtk` is used, the runtime order is:
 
 1. evaluate `cmdproxy` rewrite pipeline
 2. evaluate `cmdproxy` permission pipeline
-3. if not denied, apply the final `rtk` rewrite
-4. emit the final `updatedInput.command`
+3. evaluate Claude settings permission
+4. combine both verdicts
+5. if not denied, apply the final `rtk` rewrite
+6. emit the final `updatedInput.command`
 
 This keeps permission decisions stable even when external Bash hooks are not
-executed serially.
+executed serially, and it ensures permission checks happen before `rtk`
+rewrites the visible command.

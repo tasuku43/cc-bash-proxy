@@ -11,6 +11,7 @@ import (
 	"github.com/tasuku43/cmdproxy/internal/buildinfo"
 	"github.com/tasuku43/cmdproxy/internal/config"
 	"github.com/tasuku43/cmdproxy/internal/domain/policy"
+	"github.com/tasuku43/cmdproxy/internal/integration"
 )
 
 type Status string
@@ -32,7 +33,7 @@ type Report struct {
 	Checks []Check `json:"checks"`
 }
 
-func Run(loaded config.Loaded, home string) Report {
+func Run(loaded config.Loaded, tool string, cwd string, home string) Report {
 	var checks []Check
 
 	if len(loaded.Errors) == 0 {
@@ -57,7 +58,7 @@ func Run(loaded config.Loaded, home string) Report {
 	}
 
 	if len(loaded.Errors) == 0 {
-		if err := testsPass(loaded.Pipeline); err != nil {
+		if err := testsPass(loaded.Pipeline, tool, cwd, home); err != nil {
 			checks = append(checks, Check{ID: "tests.pass", Category: "test", Status: StatusFail, Message: err.Error()})
 		} else {
 			checks = append(checks, Check{ID: "tests.pass", Category: "test", Status: StatusPass, Message: "rewrite, permission, and end-to-end tests match expectations"})
@@ -101,16 +102,18 @@ func Run(loaded config.Loaded, home string) Report {
 		checks = append(checks, Check{ID: "install.binary-build-info", Category: "install", Status: StatusWarn, Message: "build metadata missing; prefer binaries built with VCS info embedded"})
 	}
 
-	claudeSettings := filepath.Join(home, ".claude", "settings.json")
-	if _, err := os.Stat(claudeSettings); err == nil {
-		data, readErr := os.ReadFile(claudeSettings)
-		if readErr == nil && strings.Contains(string(data), "cmdproxy hook claude") && strings.Contains(string(data), "\"matcher\": \"Bash\"") {
-			checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusPass, Message: "Claude Code hook registration detected"})
+	if tool == integration.ToolClaude {
+		claudeSettings := filepath.Join(home, ".claude", "settings.json")
+		if _, err := os.Stat(claudeSettings); err == nil {
+			data, readErr := os.ReadFile(claudeSettings)
+			if readErr == nil && strings.Contains(string(data), "cmdproxy hook claude") && strings.Contains(string(data), "\"matcher\": \"Bash\"") {
+				checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusPass, Message: "Claude Code hook registration detected"})
+			} else {
+				checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusWarn, Message: "Claude Code settings found but cmdproxy hook claude not detected"})
+			}
 		} else {
-			checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusWarn, Message: "Claude Code settings found but cmdproxy hook claude not detected"})
+			checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusWarn, Message: "Claude Code settings.json not found"})
 		}
-	} else {
-		checks = append(checks, Check{ID: "install.claude-registered", Category: "install", Status: StatusWarn, Message: "Claude Code settings.json not found"})
 	}
 
 	return Report{Checks: checks}
@@ -125,7 +128,7 @@ func HasFailures(report Report) bool {
 	return false
 }
 
-func testsPass(p policy.Pipeline) error {
+func testsPass(p policy.Pipeline, tool string, cwd string, home string) error {
 	for i, step := range p.Rewrite {
 		for _, ex := range step.Test {
 			if strings.TrimSpace(ex.Pass) != "" {
@@ -180,6 +183,7 @@ func testsPass(p policy.Pipeline) error {
 		if err != nil {
 			return err
 		}
+		decision = integration.ApplyPermissionBridge(tool, decision, cwd, home)
 		if decision.Outcome != ex.Decision {
 			return &exampleError{Scope: "test", Name: scopeName("e2e", i), Kind: "decision", Example: ex.In}
 		}

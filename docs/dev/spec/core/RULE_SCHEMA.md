@@ -81,7 +81,7 @@ Unknown top-level keys are invalid.
 
 Each rewrite step may contain:
 
-- optional `match`
+- optional selector: exactly one of `match`, `pattern`, or `patterns`
 - exactly one rewrite primitive
 - optional `continue`
 - optional `strict`
@@ -95,10 +95,16 @@ Currently implemented rewrite primitives:
 - `unwrap_wrapper`
 - `strip_command_path`
 
-### Rewrite `match`
+### Rewrite selector
 
-`match` is optional for rewrite steps. If omitted, the step is considered for
-every command.
+Each rewrite step may define one selector:
+
+- `match`
+- `pattern`
+- `patterns`
+
+The selector is optional for rewrite steps. If omitted, the step is considered
+for every command.
 
 Supported fields:
 
@@ -111,7 +117,9 @@ Supported fields:
 - `env_requires`
 - `env_missing`
 
-`pattern` is not part of the current top-level pipeline schema.
+- `pattern` matches the raw command string using one RE2 expression
+- `patterns` matches the raw command string when any RE2 expression matches
+- `pattern` and `patterns` are alternatives to structured `match`
 
 ### Rewrite `test`
 
@@ -137,7 +145,7 @@ Each bucket contains an array of permission rules.
 
 Each permission rule may contain:
 
-- required `match`
+- required selector: exactly one of `match`, `pattern`, or `patterns`
 - optional `message`
 - required `test`
 
@@ -155,6 +163,21 @@ allow:
         - "AWS_PROFILE=prod aws sts get-caller-identity"
       pass:
         - "AWS_PROFILE=prod aws s3 ls"
+```
+
+Regular-expression selectors are also allowed:
+
+```yaml
+deny:
+  - patterns:
+      - '^\s*git\s+diff\s+.*\.\.\.'
+      - '^\s*cd\s+[^&;|]+\s*(&&|;|\|)'
+    message: "blocked by command-shape policy"
+    test:
+      deny:
+        - "git diff main...HEAD"
+      pass:
+        - "git diff HEAD~1"
 ```
 
 ### Permission `test`
@@ -207,4 +230,4 @@ The following remain out of scope for the current model:
 - arbitrary shell templating
 - user-defined rewrite plugins
 - remote includes or hosted policy packs
-- Claude Code `settings.json` as the primary permission source of truth
+- tool-specific settings as the primary permission source of truth

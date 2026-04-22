@@ -56,6 +56,80 @@ test:
 	}
 }
 
+func TestLoadEffectiveForToolMergesUserAndProjectConfig(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	userPath := filepath.Join(home, ".config", "cmdproxy", "cmdproxy.yml")
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte(`rewrite:
+  - match:
+      command: aws
+    move_flag_to_env:
+      flag: "--profile"
+      env: "AWS_PROFILE"
+    test:
+      - in: "aws --profile dev sts get-caller-identity"
+        out: "AWS_PROFILE=dev aws sts get-caller-identity"
+permission:
+  allow:
+    - match:
+        command: aws
+        subcommand: sts
+        env_requires: ["AWS_PROFILE"]
+      test:
+        allow:
+          - "AWS_PROFILE=dev aws sts get-caller-identity"
+        pass:
+          - "AWS_PROFILE=dev aws s3 ls"
+test:
+  - in: "aws --profile dev sts get-caller-identity"
+    rewritten: "AWS_PROFILE=dev aws sts get-caller-identity"
+    decision: allow
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	localPath := filepath.Join(project, ".cmdproxy", "cmdproxy.yaml")
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localPath, []byte(`permission:
+  deny:
+    - pattern: '^\s*git\s+push'
+      message: "push blocked"
+      test:
+        deny:
+          - "git push origin main"
+        pass:
+          - "git status"
+test:
+  - in: "git push origin main"
+    decision: deny
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := LoadEffectiveForTool(project, home, "", "claude")
+	if len(loaded.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", loaded.Errors)
+	}
+	if len(loaded.Pipeline.Rewrite) != 1 {
+		t.Fatalf("rewrite = %#v", loaded.Pipeline.Rewrite)
+	}
+	if len(loaded.Pipeline.Permission.Allow) != 1 || len(loaded.Pipeline.Permission.Deny) != 1 {
+		t.Fatalf("permission = %#v", loaded.Pipeline.Permission)
+	}
+	if len(loaded.Pipeline.Test) != 2 {
+		t.Fatalf("tests = %#v", loaded.Pipeline.Test)
+	}
+}
+
 func TestLoadFileForEvalIfPresentSupportsStripCommandPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cmdproxy.yml")
@@ -181,6 +255,65 @@ test:
 	_, err := LoadVerifiedFileForHook(Source{Layer: LayerUser, Path: path}, []string{t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "run cmdproxy verify") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestVerifyEffectiveToAllCachesIncludesToolSettingsFingerprint(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cacheHome := t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	configPath := filepath.Join(home, ".config", "cmdproxy", "cmdproxy.yml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`permission:
+  ask:
+    - match:
+        command: git
+        subcommand: status
+      test:
+        ask:
+          - "git status"
+        pass:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"permissions":{"allow":["Bash(git status)"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pipeline, err := VerifyEffectiveToAllCaches(project, home, "", cacheHome, "claude", "vtest")
+	if err != nil {
+		t.Fatalf("VerifyEffectiveToAllCaches() error = %v", err)
+	}
+	if len(pipeline.Permission.Ask) != 1 {
+		t.Fatalf("pipeline = %#v", pipeline)
+	}
+
+	hookLoaded := LoadEffectiveForHookTool(project, home, "", cacheHome, "claude")
+	if len(hookLoaded.Errors) != 0 {
+		t.Fatalf("hook errors = %v", hookLoaded.Errors)
+	}
+
+	if err := os.WriteFile(settingsPath, []byte(`{"permissions":{"deny":["Bash(git status)"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hookLoaded = LoadEffectiveForHookTool(project, home, "", cacheHome, "claude")
+	if len(hookLoaded.Errors) == 0 {
+		t.Fatalf("expected settings fingerprint mismatch to invalidate artifact")
 	}
 }
 

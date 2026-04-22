@@ -330,7 +330,7 @@ func TestVerifyStatus(t *testing.T) {
 			{ID: "tests.pass", Status: doctor.StatusPass},
 		},
 	}
-	ok, reasons := verifyStatus(report, buildinfo.Info{Version: "dev", Module: "github.com/tasuku43/cmdproxy", VCSRevision: "abc123"})
+	ok, reasons := verifyStatus(report, buildinfo.Info{Version: "dev", Module: "github.com/tasuku43/cmdproxy", VCSRevision: "abc123"}, "claude")
 	if !ok || len(reasons) != 0 {
 		t.Fatalf("ok=%v reasons=%v", ok, reasons)
 	}

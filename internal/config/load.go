@@ -8,15 +8,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/tasuku43/cmdproxy/internal/contract"
 	"github.com/tasuku43/cmdproxy/internal/domain/policy"
+	"github.com/tasuku43/cmdproxy/internal/integration"
 	"gopkg.in/yaml.v3"
 )
 
 const LayerUser = "user"
+const LayerProject = "project"
 
 type File = policy.PipelineSpec
 
@@ -30,8 +33,12 @@ type Loaded struct {
 
 type evalCacheFile struct {
 	Version         int                 `json:"version"`
-	SourcePath      string              `json:"source_path"`
-	SourceHash      string              `json:"source_hash"`
+	Tool            string              `json:"tool"`
+	Fingerprint     string              `json:"fingerprint"`
+	SourcePath      string              `json:"source_path,omitempty"`
+	SourceHash      string              `json:"source_hash,omitempty"`
+	SourcePaths     []string            `json:"source_paths,omitempty"`
+	SettingsPaths   []string            `json:"settings_paths,omitempty"`
 	CmdproxyVersion string              `json:"cmdproxy_version,omitempty"`
 	VerifiedAt      string              `json:"verified_at,omitempty"`
 	Pipeline        policy.PipelineSpec `json:"pipeline"`
@@ -46,6 +53,25 @@ func ConfigPaths(home string, xdgConfigHome string) []Source {
 		Layer: LayerUser,
 		Path:  filepath.Join(userConfigBase, "cmdproxy", "cmdproxy.yml"),
 	}}
+}
+
+type EffectiveInputs struct {
+	Tool          string
+	ConfigSources []Source
+	SettingsPaths []string
+	Fingerprint   string
+}
+
+func ResolveEffectiveInputs(cwd string, home string, xdgConfigHome string, tool string) EffectiveInputs {
+	configSources := configSources(cwd, home, xdgConfigHome, tool)
+	settingsPaths := existingPaths(integration.SettingsPaths(tool, cwd, home))
+	fingerprint := effectiveFingerprint(tool, configSources, settingsPaths)
+	return EffectiveInputs{
+		Tool:          tool,
+		ConfigSources: configSources,
+		SettingsPaths: settingsPaths,
+		Fingerprint:   fingerprint,
+	}
 }
 
 func HookCacheDir(home string, xdgCacheHome string) string {
@@ -80,11 +106,23 @@ func LoadEffective(home string, xdgConfigHome string) Loaded {
 	return loadEffectiveWithLoader(home, xdgConfigHome, LoadFileIfPresent)
 }
 
+func LoadEffectiveForTool(cwd string, home string, xdgConfigHome string, tool string) Loaded {
+	return loadEffectiveWithSources(ResolveEffectiveInputs(cwd, home, xdgConfigHome, tool).ConfigSources, LoadFileIfPresent)
+}
+
 func LoadEffectiveForHook(home string, xdgConfigHome string, xdgCacheHome string) Loaded {
 	loader := func(src Source) (policy.Pipeline, error) {
 		return LoadVerifiedFileForHook(src, HookCacheDirs(home, xdgCacheHome))
 	}
 	return loadEffectiveWithLoader(home, xdgConfigHome, loader)
+}
+
+func LoadEffectiveForHookTool(cwd string, home string, xdgConfigHome string, xdgCacheHome string, tool string) Loaded {
+	inputs := ResolveEffectiveInputs(cwd, home, xdgConfigHome, tool)
+	loader := func(src Source) (policy.Pipeline, error) {
+		return loadVerifiedEffectivePipeline(inputs, HookCacheDirs(home, xdgCacheHome))
+	}
+	return loadEffectiveWithSources([]Source{loadOnceSource(inputs)}, loader)
 }
 
 func loadEffectiveWithLoader(home string, xdgConfigHome string, loader func(Source) (policy.Pipeline, error)) Loaded {
@@ -100,6 +138,23 @@ func loadEffectiveWithLoader(home string, xdgConfigHome string, loader func(Sour
 		}
 		loaded.Files = append(loaded.Files, src)
 		loaded.Pipeline = pipeline
+	}
+	return loaded
+}
+
+func loadEffectiveWithSources(sources []Source, loader func(Source) (policy.Pipeline, error)) Loaded {
+	var loaded Loaded
+	for _, src := range sources {
+		pipeline, err := loader(src)
+		if err != nil {
+			loaded.Errors = append(loaded.Errors, err)
+			continue
+		}
+		if isZeroPipeline(pipeline.PipelineSpec) {
+			continue
+		}
+		loaded.Files = append(loaded.Files, src)
+		loaded.Pipeline = mergePipelines(loaded.Pipeline, pipeline)
 	}
 	return loaded
 }
@@ -151,6 +206,42 @@ func VerifyFileToAllCaches(src Source, cacheDirs []string, cmdproxyVersion strin
 		if !success || i == 0 {
 			pipeline = loaded
 		}
+		success = true
+	}
+	if !success {
+		if len(errs) == 0 {
+			return policy.Pipeline{}, fmt.Errorf("failed to write verified artifacts")
+		}
+		return policy.Pipeline{}, errors.New(strings.Join(errs, "; "))
+	}
+	return pipeline, nil
+}
+
+func VerifyEffectiveToAllCaches(cwd string, home string, xdgConfigHome string, xdgCacheHome string, tool string, cmdproxyVersion string) (policy.Pipeline, error) {
+	inputs := ResolveEffectiveInputs(cwd, home, xdgConfigHome, tool)
+	pipeline, err := compileEffectivePipeline(inputs)
+	if err != nil {
+		return policy.Pipeline{}, err
+	}
+	cache := evalCacheFile{
+		Version:         2,
+		Tool:            tool,
+		Fingerprint:     inputs.Fingerprint,
+		SourcePaths:     sourcePaths(inputs.ConfigSources),
+		SettingsPaths:   inputs.SettingsPaths,
+		CmdproxyVersion: cmdproxyVersion,
+		VerifiedAt:      time.Now().UTC().Format(time.RFC3339),
+		Pipeline:        pipeline.PipelineSpec,
+	}
+	var errs []string
+	success := false
+	for _, cacheDir := range HookCacheDirs(home, xdgCacheHome) {
+		cachePath := effectiveCachePath(cacheDir, tool, inputs.Fingerprint)
+		if err := writeEvalCache(cachePath, cache); err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		pruneOldEffectiveCaches(cacheDir, tool, cachePath)
 		success = true
 	}
 	if !success {
@@ -238,6 +329,16 @@ func loadVerifiedFileForHook(src Source, cacheDirs []string) (policy.Pipeline, e
 	return policy.Pipeline{}, fmt.Errorf("%s config %s changed since last verify; verified artifact not found in %s; run cmdproxy verify", src.Layer, src.Path, strings.Join(cacheDirs, ", "))
 }
 
+func loadVerifiedEffectivePipeline(inputs EffectiveInputs, cacheDirs []string) (policy.Pipeline, error) {
+	for _, cacheDir := range cacheDirs {
+		cachePath := effectiveCachePath(cacheDir, inputs.Tool, inputs.Fingerprint)
+		if pipeline, ok := loadEffectiveEvalCache(cachePath, inputs); ok {
+			return pipeline, nil
+		}
+	}
+	return policy.Pipeline{}, fmt.Errorf("effective config for %s changed since last verify; verified artifact not found in %s; run cmdproxy verify %s", inputs.Tool, strings.Join(cacheDirs, ", "), inputs.Tool)
+}
+
 func decodeFile(src Source, data string) (File, error) {
 	dec := yaml.NewDecoder(strings.NewReader(data))
 	dec.KnownFields(true)
@@ -273,6 +374,21 @@ func loadEvalCache(src Source, cachePath string, sourceHash string, requireVerif
 	return policy.NewPipeline(cache.Pipeline, src), true
 }
 
+func loadEffectiveEvalCache(cachePath string, inputs EffectiveInputs) (policy.Pipeline, bool) {
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return policy.Pipeline{}, false
+	}
+	var cache evalCacheFile
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return policy.Pipeline{}, false
+	}
+	if cache.Version != 2 || cache.Tool != inputs.Tool || cache.Fingerprint != inputs.Fingerprint || strings.TrimSpace(cache.VerifiedAt) == "" {
+		return policy.Pipeline{}, false
+	}
+	return policy.NewPipeline(cache.Pipeline, loadOnceSource(inputs)), true
+}
+
 func writeEvalCache(cachePath string, cache evalCacheFile) error {
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 		return err
@@ -305,8 +421,34 @@ func pruneOldEvalCaches(cacheDir string, keepPath string) {
 	}
 }
 
+func pruneOldEffectiveCaches(cacheDir string, tool string, keepPath string) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return
+	}
+	prefix := "compiled-" + tool + "-"
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		path := filepath.Join(cacheDir, name)
+		if path == keepPath {
+			continue
+		}
+		_ = os.Remove(path)
+	}
+}
+
 func cachePathForHash(cacheDir string, sourceHash string) string {
 	return filepath.Join(cacheDir, "compiled-rules-"+sourceHash+".json")
+}
+
+func effectiveCachePath(cacheDir string, tool string, fingerprint string) string {
+	return filepath.Join(cacheDir, "compiled-"+tool+"-"+fingerprint+".json")
 }
 
 func contentHash(data string) string {
@@ -317,6 +459,123 @@ func contentHash(data string) string {
 func shortHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])[:12]
+}
+
+func mergePipelines(base policy.Pipeline, next policy.Pipeline) policy.Pipeline {
+	base.Rewrite = append(base.Rewrite, next.Rewrite...)
+	base.Permission.Deny = append(base.Permission.Deny, next.Permission.Deny...)
+	base.Permission.Ask = append(base.Permission.Ask, next.Permission.Ask...)
+	base.Permission.Allow = append(base.Permission.Allow, next.Permission.Allow...)
+	base.Test = append(base.Test, next.Test...)
+	if base.Source == (policy.Source{}) {
+		base.Source = next.Source
+	}
+	return base
+}
+
+func compileEffectivePipeline(inputs EffectiveInputs) (policy.Pipeline, error) {
+	loaded := loadEffectiveWithSources(inputs.ConfigSources, LoadFileIfPresent)
+	if len(loaded.Errors) > 0 {
+		return policy.Pipeline{}, loaded.Errors[0]
+	}
+	return loaded.Pipeline, nil
+}
+
+func loadOnceSource(inputs EffectiveInputs) Source {
+	return Source{
+		Layer: "effective",
+		Path:  "effective:" + inputs.Tool,
+	}
+}
+
+func sourcePaths(sources []Source) []string {
+	paths := make([]string, 0, len(sources))
+	for _, src := range sources {
+		paths = append(paths, src.Path)
+	}
+	return paths
+}
+
+func existingPaths(paths []string) []string {
+	var existing []string
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			existing = append(existing, path)
+		}
+	}
+	return existing
+}
+
+func configSources(cwd string, home string, xdgConfigHome string, tool string) []Source {
+	var sources []Source
+	for _, path := range resolveUserConfigCandidates(home, xdgConfigHome) {
+		if path == "" {
+			continue
+		}
+		sources = append(sources, Source{Layer: LayerUser, Path: path})
+		break
+	}
+	if root := integration.ProjectRoot(tool, cwd); root != "" {
+		for _, path := range resolveProjectConfigCandidates(root) {
+			if path == "" {
+				continue
+			}
+			sources = append(sources, Source{Layer: LayerProject, Path: path})
+			break
+		}
+	}
+	return sources
+}
+
+func resolveUserConfigCandidates(home string, xdgConfigHome string) []string {
+	base := xdgConfigHome
+	if base == "" {
+		base = filepath.Join(home, ".config")
+	}
+	dir := filepath.Join(base, "cmdproxy")
+	return configCandidates(dir)
+}
+
+func resolveProjectConfigCandidates(root string) []string {
+	return configCandidates(filepath.Join(root, ".cmdproxy"))
+}
+
+func configCandidates(dir string) []string {
+	candidates := []string{
+		filepath.Join(dir, "cmdproxy.yml"),
+		filepath.Join(dir, "cmdproxy.yaml"),
+	}
+	var existing []string
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			existing = append(existing, path)
+		}
+	}
+	if len(existing) > 0 {
+		sort.Strings(existing)
+		return existing
+	}
+	return candidates
+}
+
+func effectiveFingerprint(tool string, sources []Source, settingsPaths []string) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte("tool=" + tool + "\n"))
+	for _, src := range sources {
+		_, _ = h.Write([]byte(src.Layer + ":" + src.Path + "\n"))
+		if data, err := os.ReadFile(src.Path); err == nil {
+			_, _ = h.Write(data)
+		}
+		_, _ = h.Write([]byte("\n"))
+	}
+	for _, path := range settingsPaths {
+		_, _ = h.Write([]byte("settings:" + path + "\n"))
+		if data, err := os.ReadFile(path); err == nil {
+			_, _ = h.Write(data)
+		}
+		_, _ = h.Write([]byte("\n"))
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func readConfigFile(src Source) (string, error) {
