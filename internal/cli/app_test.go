@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,6 +143,60 @@ test:
 	}
 	hookOut := payload["hookSpecificOutput"].(map[string]any)
 	if _, ok := hookOut["permissionDecision"]; ok {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestRunHookClaudeRTKEvaluatesPermissionsBeforeRTKRewrite(t *testing.T) {
+	home := t.TempDir()
+	toolDir := t.TempDir()
+	rtkPath := filepath.Join(toolDir, "rtk")
+	script := "#!/bin/sh\nif [ \"$1\" = \"rewrite\" ]; then\n  printf 'rtk %s\\n' \"$2\"\n  exit 0\nfi\nexit 1\n"
+	if err := os.WriteFile(rtkPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fmt.Sprintf("%s:%s", toolDir, os.Getenv("PATH")))
+
+	writeClaudeSettings(t, home, `{
+  "permissions": {
+    "allow": ["Bash(git diff goal.md)"]
+  }
+}`)
+	writeUserConfig(t, home, `permission:
+  allow:
+    - match:
+        command: git
+        subcommand: diff
+      test:
+        allow:
+          - "git diff goal.md"
+        pass:
+          - "git status"
+test:
+  - in: "git diff goal.md"
+    decision: allow
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"hook", "claude", "--rtk"}, Streams{
+		Stdin:  strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"git diff goal.md"}}`),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v", err)
+	}
+	hookOut := payload["hookSpecificOutput"].(map[string]any)
+	if hookOut["permissionDecision"] != "allow" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	updatedInput := hookOut["updatedInput"].(map[string]any)
+	if updatedInput["command"] != "rtk git diff goal.md" {
 		t.Fatalf("payload = %+v", payload)
 	}
 }
