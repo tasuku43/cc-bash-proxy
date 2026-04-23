@@ -330,7 +330,74 @@ test:
 			wantPermissionField: true,
 		},
 		{
-			name: "no explicit allow becomes ask",
+			name: "explicit ask beats allow",
+			cmdproxyPermission: `permission:
+  allow:
+    - match:
+        command: git
+        subcommand: status
+      test:
+        allow:
+          - "git status"
+        pass:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`,
+			claudeSettings: `{
+  "permissions": {
+    "ask": ["Bash(git status)"]
+  }
+}`,
+			command:             "git status",
+			wantDecision:        "ask",
+			wantPermissionField: false,
+		},
+		{
+			name: "cmdproxy allow plus settings abstain stays allow",
+			cmdproxyPermission: `permission:
+  allow:
+    - match:
+        command: git
+        subcommand: status
+      test:
+        allow:
+          - "git status"
+        pass:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`,
+			claudeSettings:      `{ "permissions": {} }`,
+			command:             "git status",
+			wantDecision:        "allow",
+			wantPermissionField: true,
+		},
+		{
+			name: "both abstain become ask",
+			cmdproxyPermission: `permission:
+  allow:
+    - match:
+        command: aws
+        subcommand: sts
+      test:
+        allow:
+          - "aws sts get-caller-identity"
+        pass:
+          - "git status"
+test:
+  - in: "aws sts get-caller-identity"
+    decision: allow
+`,
+			claudeSettings:      `{ "permissions": {} }`,
+			command:             "git status",
+			wantDecision:        "ask",
+			wantPermissionField: false,
+		},
+		{
+			name: "cmdproxy ask plus settings abstain stays ask",
 			cmdproxyPermission: `permission:
   ask:
     - match:

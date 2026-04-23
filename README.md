@@ -70,9 +70,9 @@ Add a `PreToolUse` Bash hook that calls `cmdproxy hook claude --rtk`.
 }
 ```
 
-`cmdproxy` evaluates its own policy and then combines that result with Claude
-Code settings during a migration/coexistence period. The final result returned
-to Claude is:
+`cmdproxy` is currently optimized for Claude Code and then combines its own
+policy result with Claude settings during a migration/coexistence period. The
+final result returned to Claude is:
 
 - `allow`: auto-allow
 - `ask`: let Claude prompt the user
@@ -83,9 +83,19 @@ and then applies the final `rtk` rewrite before returning `updatedInput`.
 
 ### Permission Merge Rule
 
-`cmdproxy` and Claude settings are merged with a safety-first rule:
+`cmdproxy` and Claude settings are merged with a migration compatibility rule.
+
+Claude settings are interpreted as four states:
+
+- `deny`
+- `ask`
+- `allow`
+- `abstain` (no matching rule)
+
+The final rule is:
 
 - if either side returns `deny`, the final result is `deny`
+- else if either side explicitly returns `ask`, the final result is `ask`
 - else if either side returns `allow`, the final result is `allow`
 - otherwise the final result is `ask`
 
@@ -95,13 +105,19 @@ The important combinations are:
 |---|---|---|
 | `deny` | `deny` | `deny` |
 | `deny` | `allow` | `deny` |
-| `deny` | `ask` / default | `deny` |
+| `deny` | `ask` / `abstain` | `deny` |
 | `ask` | `deny` | `deny` |
 | `ask` | `allow` | `allow` |
-| `ask` | `ask` / default | `ask` |
+| `ask` | `ask` | `ask` |
+| `ask` | `abstain` | `ask` |
 | `allow` | `deny` | `deny` |
+| `allow` | `ask` | `ask` |
 | `allow` | `allow` | `allow` |
-| `allow` | `ask` / default | `allow` |
+| `allow` | `abstain` | `allow` |
+| `abstain` | `deny` | `deny` |
+| `abstain` | `ask` | `ask` |
+| `abstain` | `allow` | `allow` |
+| `abstain` | `abstain` | `ask` |
 
 ## Current Config Shape
 

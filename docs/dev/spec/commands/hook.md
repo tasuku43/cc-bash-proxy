@@ -37,8 +37,9 @@ The current flow is:
 9. Evaluate tool-native permissions for migration and coexistence
 10. Combine both permission sources with:
    - deny if either side denies
+   - ask if either side explicitly asks
    - allow if either side allows
-   - ask otherwise
+   - ask if both sides abstain
 11. Emit tool hook JSON:
    - `allow`: `permissionDecision: "allow"`
    - `ask`: no `permissionDecision`, so Claude prompts
@@ -70,6 +71,13 @@ evaluation continues with the current command.
 
 Tool-native settings remain part of the effective runtime verdict during
 evaluation and verification.
+
+During migration, tool-native settings are treated as four-state inputs:
+
+- `deny`
+- `ask`
+- `allow`
+- `abstain` (no matching rule)
 
 ## RTK Integration
 

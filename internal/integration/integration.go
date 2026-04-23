@@ -70,13 +70,30 @@ func applyClaudePermissionBridge(decision policy.Decision, cwd string, home stri
 			Message: "Claude settings allow matched during migration",
 		})
 		decision.Outcome = "allow"
-	case claude.PermissionAsk, claude.PermissionDefault:
-		if decision.Outcome != "allow" && decision.Outcome != "deny" {
+	case claude.PermissionAsk:
+		if decision.Outcome == "deny" {
+			return decision
+		}
+		decision.Trace = append(decision.Trace, policy.TraceStep{
+			Action:  "permission",
+			Name:    "claude_settings",
+			Effect:  "ask",
+			Message: "Claude settings explicitly require confirmation during migration",
+		})
+		decision.Outcome = "ask"
+	case claude.PermissionDefault:
+		decision.Trace = append(decision.Trace, policy.TraceStep{
+			Action:  "permission",
+			Name:    "claude_settings",
+			Effect:  "abstain",
+			Message: "Claude settings did not define a matching permission during migration",
+		})
+		if decision.Outcome == "" {
 			decision.Trace = append(decision.Trace, policy.TraceStep{
 				Action:  "permission",
-				Name:    "claude_settings",
+				Name:    "default",
 				Effect:  "ask",
-				Message: "Claude settings require confirmation during migration",
+				Message: "no explicit permission source matched; falling back to ask",
 			})
 			decision.Outcome = "ask"
 		}
