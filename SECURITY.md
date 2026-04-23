@@ -19,10 +19,12 @@ Report security issues privately to the maintainer with:
 
 ## Supported Versions
 
-Security fixes are generally provided for the latest released version.
+Until the first public GitHub Release exists, security fixes are provided on
+`main` and any actively maintained pre-release branches.
 
-You may be asked to reproduce the issue on the latest release before a fix is
-prepared.
+After releases begin, security fixes are generally provided for the latest
+released version. You may be asked to reproduce the issue on the latest release
+before a fix is prepared.
 
 ## Verification Guidance
 
@@ -33,7 +35,11 @@ Before relying on a downloaded build:
 
 1. verify the published release checksum
 2. inspect the binary with `cmdproxy version --format json`
-3. run `cmdproxy verify --format json`
+3. run `cmdproxy verify claude --format json`
+
+If no public GitHub Release exists yet, prefer building from source and then
+running `cmdproxy version --format json` plus `cmdproxy verify claude --format
+json` instead of relying on unpublished release expectations.
 
 ## Disclosure
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cmdproxy` releases are tag-driven.
+`cmdproxy` releases are intended to be tag-driven.
 
 The intended pipeline is:
 
@@ -12,6 +12,10 @@ The intended pipeline is:
 4. publish GitHub Release artifacts and `checksums.txt`
 5. for stable tags without prerelease suffixes, optionally open a PR against
    `tasuku43/homebrew-cmdproxy`
+
+This document describes the designed release process. If no public GitHub
+Release exists yet, treat these steps as the target release policy rather than
+an already-exercised distribution guarantee.
 
 ## Release Inputs
 

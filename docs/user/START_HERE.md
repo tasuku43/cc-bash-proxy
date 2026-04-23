@@ -22,7 +22,7 @@ cmdproxy init
 3. Verify the config after each change
 
 ```sh
-cmdproxy verify
+cmdproxy verify claude
 cmdproxy doctor --format json
 ```
 
@@ -44,10 +44,17 @@ same rewrite and permission logic used by the Claude hook path.
 If you install `cmdproxy` from a release artifact, verify it before relying on
 it in your command path.
 
+If no public GitHub Release exists yet, build from source and use:
+
+```sh
+cmdproxy version --format json
+cmdproxy verify claude --format json
+```
+
 1. Check the downloaded file against `checksums.txt`
 2. Verify the release provenance with GitHub attestation data
 3. Inspect the binary metadata
-4. Run `cmdproxy verify`
+4. Run `cmdproxy verify claude`
 
 Example:
 
@@ -55,7 +62,7 @@ Example:
 shasum -a 256 -c checksums.txt
 gh attestation verify path/to/cmdproxy_<tag>_<os>_<arch>.tar.gz -R tasuku43/cmdguard
 cmdproxy version --format json
-cmdproxy verify --format json
+cmdproxy verify --format json claude
 ```
 
 ## Claude Code

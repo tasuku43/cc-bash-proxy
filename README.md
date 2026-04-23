@@ -81,7 +81,7 @@ cmdproxy init
 3. Verify and compile the config
 
 ```sh
-cmdproxy verify
+cmdproxy verify claude
 cmdproxy check aws --profile read-only-profile s3 ls
 ```
 
@@ -159,6 +159,21 @@ The important combinations are:
 | `abstain` | `ask` | `ask` |
 | `abstain` | `allow` | `allow` |
 | `abstain` | `abstain` | `ask` |
+
+## Release Verification
+
+The release pipeline, checksums, attestations, and Homebrew update path are
+designed and implemented, but the first GitHub Release may still be pending.
+
+Until a public release exists, prefer building from source and then running:
+
+```sh
+cmdproxy version --format json
+cmdproxy verify claude --format json
+```
+
+Once GitHub Releases exist, treat checksums and attestations as the preferred
+verification path for downloaded archives.
 
 ## Current Config Shape
 
