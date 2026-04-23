@@ -64,6 +64,6 @@ Please include:
 
 ## Release Model
 
-- releases are tag-driven (`v*`) via GitHub Actions
-- artifacts are published to GitHub Releases
+- the intended release model is tag-driven (`v*`) via GitHub Actions
+- once public releases begin, artifacts are published to GitHub Releases
 - stable tags can update the Homebrew tap (`tasuku43/homebrew-cc-bash-proxy`)

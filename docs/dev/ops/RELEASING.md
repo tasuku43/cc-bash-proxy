@@ -13,6 +13,10 @@ The intended pipeline is:
 5. for stable tags without prerelease suffixes, optionally open a PR against
    `tasuku43/homebrew-cc-bash-proxy`
 
+This document describes the designed release process. If no public GitHub
+Release exists yet, treat these steps as the target release policy rather than
+an already-exercised distribution guarantee.
+
 ## Release Inputs
 
 - Workflow: `.github/workflows/release.yml`

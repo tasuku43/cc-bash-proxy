@@ -14,6 +14,7 @@ import (
 	"github.com/tasuku43/cc-bash-proxy/internal/buildinfo"
 	"github.com/tasuku43/cc-bash-proxy/internal/config"
 	"github.com/tasuku43/cc-bash-proxy/internal/doctor"
+	"github.com/tasuku43/cc-bash-proxy/internal/domain/invocation"
 	"github.com/tasuku43/cc-bash-proxy/internal/domain/policy"
 	"github.com/tasuku43/cc-bash-proxy/internal/input"
 	"github.com/tasuku43/cc-bash-proxy/internal/integration"
@@ -106,7 +107,7 @@ func runCheck(args []string, streams Streams, env Env) int {
 		writeCommandHelp(streams.Stderr, "check")
 		return exitError
 	}
-	req := input.ExecRequest{Action: "exec", Command: strings.Join(rest, " ")}
+	req := input.ExecRequest{Action: "exec", Command: invocation.Join(rest)}
 	return evaluateRequest(req, format, streams, env)
 }
 
@@ -597,12 +598,15 @@ Typical use:
 
 Evaluate one command string against the current rule set.
 Use this while authoring rules before relying on Claude Code hooks.
+For shell-sensitive examples, pass a single quoted command string so the shell
+does not pre-split nested arguments before cmdproxy reconstructs the invocation.
 
 Usage:
   cc-bash-proxy check [--format json] <command>
 
 Examples:
   cc-bash-proxy check 'git -C repo status'
+  cc-bash-proxy check 'bash -c '"'"'echo hello world'"'"''
   cc-bash-proxy check --format json 'AWS_PROFILE=read-only-profile aws s3 ls'
 `)
 	case "doctor":

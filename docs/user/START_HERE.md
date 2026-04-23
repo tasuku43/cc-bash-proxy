@@ -29,9 +29,13 @@ cc-bash-proxy doctor --format json
 4. Spot-check individual commands
 
 ```sh
-cc-bash-proxy check aws --profile read-only-profile s3 ls
-cc-bash-proxy check bash -c 'git status'
+cc-bash-proxy check 'aws --profile read-only-profile s3 ls'
+cc-bash-proxy check 'bash -c '"'"'git status'"'"''
 ```
+
+For shell-sensitive spot checks, prefer a single quoted command string. This
+lets `cc-bash-proxy check` reconstruct the intended invocation before applying the
+same rewrite and permission logic used by the Claude hook path.
 
 5. Register `cc-bash-proxy hook` in Claude Code
 
@@ -39,6 +43,13 @@ cc-bash-proxy check bash -c 'git status'
 
 If you install `cc-bash-proxy` from a release artifact, verify it before relying on
 it in your command path.
+
+If no public GitHub Release exists yet, build from source and use:
+
+```sh
+cc-bash-proxy version --format json
+cc-bash-proxy verify --format json
+```
 
 1. Check the downloaded file against `checksums.txt`
 2. Verify the release provenance with GitHub attestation data
