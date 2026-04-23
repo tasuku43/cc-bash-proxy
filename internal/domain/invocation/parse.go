@@ -43,7 +43,14 @@ func Tokens(command string) []string {
 }
 
 func Join(tokens []string) string {
-	return strings.Join(tokens, " ")
+	if len(tokens) == 0 {
+		return ""
+	}
+	escaped := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		escaped = append(escaped, shellEscapeToken(token))
+	}
+	return strings.Join(escaped, " ")
 }
 
 func tokenize(command string) []string {
@@ -64,6 +71,9 @@ func tokenize(command string) []string {
 	for _, r := range command {
 		switch {
 		case escaped:
+			if escaped && inDouble && !isDoubleQuotedEscapeTarget(r) {
+				current.WriteRune('\\')
+			}
 			current.WriteRune(r)
 			escaped = false
 		case inSingle:
@@ -152,8 +162,8 @@ func IsAbsoluteCommand(token string) bool {
 }
 
 func isEnvAssignment(token string) bool {
-	name, value, ok := strings.Cut(token, "=")
-	if !ok || name == "" || value == "" {
+	name, _, ok := strings.Cut(token, "=")
+	if !ok || name == "" {
 		return false
 	}
 	for i, r := range name {
@@ -172,6 +182,49 @@ func isEnvAssignment(token string) bool {
 
 func IsEnvAssignment(token string) bool {
 	return isEnvAssignment(token)
+}
+
+func isDoubleQuotedEscapeTarget(r rune) bool {
+	switch r {
+	case '"', '\\', '$', '`':
+		return true
+	}
+	return false
+}
+
+func shellEscapeToken(token string) string {
+	if IsEnvAssignment(token) {
+		name, value, _ := strings.Cut(token, "=")
+		if value == "" {
+			return name + "="
+		}
+		return name + "=" + shellEscapeValue(value)
+	}
+	return shellEscapeValue(token)
+}
+
+func shellEscapeValue(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if isShellSafe(value) {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func isShellSafe(value string) bool {
+	for _, r := range value {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			continue
+		case strings.ContainsRune("_@%+=:,./-", r):
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func skipSudoWrapper(tokens []string, i int) int {

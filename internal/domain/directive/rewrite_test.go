@@ -23,6 +23,13 @@ func TestMoveFlagToEnvSupportsEqualsForm(t *testing.T) {
 	}
 }
 
+func TestMoveFlagToEnvPreservesQuotedArgs(t *testing.T) {
+	got, ok := MoveFlagToEnv(`aws --profile read-only-profile s3 cp "hello world" s3://bucket/key`, "--profile", "AWS_PROFILE")
+	if !ok || got != `AWS_PROFILE=read-only-profile aws s3 cp 'hello world' s3://bucket/key` {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+}
+
 func TestMoveEnvToFlag(t *testing.T) {
 	got, ok := MoveEnvToFlag("AWS_PROFILE=read-only-profile aws s3 ls", "AWS_PROFILE", "--profile")
 	if !ok || got != "aws --profile read-only-profile s3 ls" {
@@ -37,6 +44,13 @@ func TestMoveEnvToFlagPreservesOtherEnvAssignments(t *testing.T) {
 	}
 }
 
+func TestMoveEnvToFlagPreservesEmptyEnvAssignments(t *testing.T) {
+	got, ok := MoveEnvToFlag("FOO= AWS_PROFILE=read-only-profile aws s3 ls", "AWS_PROFILE", "--profile")
+	if !ok || got != "FOO= aws --profile read-only-profile s3 ls" {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+}
+
 func TestUnwrapWrapper(t *testing.T) {
 	got, ok := UnwrapWrapper("env AWS_PROFILE=read-only-profile command exec aws s3 ls", []string{"env", "command", "exec"})
 	if !ok || got != "AWS_PROFILE=read-only-profile aws s3 ls" {
@@ -47,6 +61,13 @@ func TestUnwrapWrapper(t *testing.T) {
 func TestUnwrapWrapperRejectsEnvOptions(t *testing.T) {
 	if _, ok := UnwrapWrapper("env -i aws s3 ls", []string{"env"}); ok {
 		t.Fatal("expected unwrap to fail")
+	}
+}
+
+func TestUnwrapWrapperPreservesQuotedArgs(t *testing.T) {
+	got, ok := UnwrapWrapper(`env FOO="hello world" command aws s3 cp "hello world" s3://bucket/key`, []string{"env", "command"})
+	if !ok || got != `FOO='hello world' aws s3 cp 'hello world' s3://bucket/key` {
+		t.Fatalf("got %q ok=%v", got, ok)
 	}
 }
 
