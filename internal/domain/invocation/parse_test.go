@@ -42,6 +42,16 @@ func TestJoinRoundTripPreservesEnvAssignmentWithSpaces(t *testing.T) {
 	}
 }
 
+func TestJoinRoundTripPreservesSingleQuotesInToken(t *testing.T) {
+	command := `printf "%s\n" "it's fine"`
+
+	want := Tokens(command)
+	got := Tokens(Join(want))
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Tokens(Join(Tokens(command))) = %#v, want %#v", got, want)
+	}
+}
+
 func TestIsEnvAssignmentAcceptsEmptyValue(t *testing.T) {
 	if !IsEnvAssignment("FOO=") {
 		t.Fatal("expected empty env assignment to be treated as env assignment")

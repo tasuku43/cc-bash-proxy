@@ -51,6 +51,13 @@ func TestMoveEnvToFlagPreservesEmptyEnvAssignments(t *testing.T) {
 	}
 }
 
+func TestMoveEnvToFlagPreservesQuotedValues(t *testing.T) {
+	got, ok := MoveEnvToFlag(`FOO=bar AWS_PROFILE=read-only-profile aws s3 cp "it's fine" s3://bucket/key`, "AWS_PROFILE", "--profile")
+	if !ok || got != `FOO=bar aws --profile read-only-profile s3 cp 'it'"'"'s fine' s3://bucket/key` {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+}
+
 func TestUnwrapWrapper(t *testing.T) {
 	got, ok := UnwrapWrapper("env AWS_PROFILE=read-only-profile command exec aws s3 ls", []string{"env", "command", "exec"})
 	if !ok || got != "AWS_PROFILE=read-only-profile aws s3 ls" {
@@ -67,6 +74,13 @@ func TestUnwrapWrapperRejectsEnvOptions(t *testing.T) {
 func TestUnwrapWrapperPreservesQuotedArgs(t *testing.T) {
 	got, ok := UnwrapWrapper(`env FOO="hello world" command aws s3 cp "hello world" s3://bucket/key`, []string{"env", "command"})
 	if !ok || got != `FOO='hello world' aws s3 cp 'hello world' s3://bucket/key` {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+}
+
+func TestUnwrapWrapperPreservesEmptyEnvAssignments(t *testing.T) {
+	got, ok := UnwrapWrapper(`env FOO= command aws s3 ls`, []string{"env", "command"})
+	if !ok || got != `FOO= aws s3 ls` {
 		t.Fatalf("got %q ok=%v", got, ok)
 	}
 }
