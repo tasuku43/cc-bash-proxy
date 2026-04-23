@@ -16,10 +16,21 @@ stdin JSON from an external hook.
 `cc-bash-proxy check` is the interactive convenience wrapper over the same directive
 application logic used by `cc-bash-proxy hook`.
 
-- it accepts a command string as CLI input
+- it accepts shell argv and reconstructs one command string internally
 - it constructs the canonical execution request internally
 - it applies the same parse, match, and directive flow
 - it emits the same pass / rewrite / reject / error outcomes
+
+For shell-sensitive examples, callers should prefer a single quoted command
+string, for example:
+
+```sh
+cmdproxy check 'git -C repo status'
+cmdproxy check 'bash -c '"'"'echo hello world'"'"''
+```
+
+This keeps quoting and nested arguments intact before `cmdproxy` rebuilds the
+command string from CLI argv.
 
 ## Use Cases
 
