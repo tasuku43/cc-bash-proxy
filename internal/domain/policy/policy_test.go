@@ -231,6 +231,79 @@ func TestMatchSpecGitSubcommandMatchesGlobalOptionVariants(t *testing.T) {
 	}
 }
 
+func TestEvaluateGitStatusAllowMatchesSupportedGlobalOptions(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Match: MatchSpec{Command: "git", Subcommand: "status"},
+			}},
+		},
+	}, Source{})
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "plain", command: "git status"},
+		{name: "working directory", command: "git -C repo status"},
+		{name: "working directory with status option", command: "git -C repo status --short"},
+		{name: "config", command: "git -c core.quotePath=false status"},
+		{name: "git dir separate", command: "git --git-dir .git status"},
+		{name: "git dir equals", command: "git --git-dir=.git status"},
+		{name: "work tree separate", command: "git --work-tree . status"},
+		{name: "work tree equals", command: "git --work-tree=. status"},
+		{name: "namespace separate", command: "git --namespace main status"},
+		{name: "namespace equals", command: "git --namespace=main status"},
+		{name: "no pager", command: "git --no-pager status"},
+		{name: "bare", command: "git --bare status"},
+		{name: "combined globals", command: "git -C repo -c core.quotePath=false --no-pager --git-dir .git --work-tree . --namespace main status --short"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Evaluate(p, tt.command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != "allow" {
+				t.Fatalf("Evaluate(%q).Outcome = %q, want allow; decision=%+v", tt.command, got.Outcome, got)
+			}
+		})
+	}
+}
+
+func TestEvaluateGitStatusAllowDoesNotMatchNonStatusOrUnsafeShell(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Match: MatchSpec{Command: "git", Subcommand: "status"},
+			}},
+		},
+	}, Source{})
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "different subcommand", command: "git -C repo diff"},
+		{name: "double dash before status", command: "git -C repo -- status"},
+		{name: "compound status and diff", command: "git status && git diff"},
+		{name: "pipeline status", command: "git status | sh"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Evaluate(p, tt.command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != "ask" {
+				t.Fatalf("Evaluate(%q).Outcome = %q, want ask; decision=%+v", tt.command, got.Outcome, got)
+			}
+		})
+	}
+}
+
 func TestMatchSpecGitSubcommandDoesNotTreatDoubleDashBeforeStatusAsStatus(t *testing.T) {
 	match := MatchSpec{Command: "git", Subcommand: "status"}
 	if match.MatchMatches("git -C repo -- status") {
