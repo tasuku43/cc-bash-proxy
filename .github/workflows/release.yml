@@ -14,6 +14,9 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    env:
+      HOMEBREW_APP_ID: ${{ secrets.HOMEBREW_APP_ID }}
+      HOMEBREW_APP_KEY: ${{ secrets.HOMEBREW_APP_KEY }}
 
     steps:
       - name: Checkout
@@ -68,12 +71,12 @@ jobs:
           echo "stable=true" >>"${GITHUB_OUTPUT}"
 
       - name: Create GitHub App token for Homebrew tap
-        if: steps.channel.outputs.stable == 'true' && secrets.HOMEBREW_APP_ID != '' && secrets.HOMEBREW_APP_KEY != ''
+        if: steps.channel.outputs.stable == 'true' && env.HOMEBREW_APP_ID != '' && env.HOMEBREW_APP_KEY != ''
         id: homebrew-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.HOMEBREW_APP_ID }}
-          private-key: ${{ secrets.HOMEBREW_APP_KEY }}
+          app-id: ${{ env.HOMEBREW_APP_ID }}
+          private-key: ${{ env.HOMEBREW_APP_KEY }}
           owner: tasuku43
           repositories: homebrew-cc-bash-proxy
 
