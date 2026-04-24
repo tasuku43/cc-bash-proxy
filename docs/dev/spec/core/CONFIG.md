@@ -26,6 +26,16 @@ The effective policy is the merge of:
 - global `cc-bash-proxy` policy
 - project-local `cc-bash-proxy` policy
 
+Merge order is deterministic:
+
+- user-wide policy is loaded first
+- project-local policy is loaded second
+- rewrite rules append in source order
+- permission rules append within each bucket in source order
+- top-level E2E tests append in source order
+- scalar options, such as `claude_permission_merge_mode`, use the last
+  non-empty value, so project-local config can override user-wide config
+
 Project root resolution is currently delegated to the Claude-aware runtime paths
 used by `cc-bash-proxy hook` and `cc-bash-proxy verify`.
 

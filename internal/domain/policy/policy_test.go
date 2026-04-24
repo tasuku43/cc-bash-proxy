@@ -1,6 +1,9 @@
 package policy
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 func TestEvaluateRewriteThenAllow(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
@@ -91,6 +94,22 @@ func TestValidatePipelineRequiresE2ETest(t *testing.T) {
 				{Pass: "bash script.sh"},
 			},
 		}},
+	})
+	if len(issues) == 0 {
+		t.Fatal("expected validation issues")
+	}
+}
+
+func TestValidatePipelineRejectsUnknownClaudePermissionMergeMode(t *testing.T) {
+	issues := ValidatePipeline(PipelineSpec{
+		ClaudePermissionMergeMode: "loose",
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Match: MatchSpec{Command: "git", Subcommand: "status"},
+				Test:  PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
+			}},
+		},
+		Test: PipelineTestSpec{{In: "git status", Decision: "allow"}},
 	})
 	if len(issues) == 0 {
 		t.Fatal("expected validation issues")
@@ -209,4 +228,51 @@ func TestEvaluatePatternAllowCanStillOptInToUnsafeShellExpressions(t *testing.T)
 	if got.Outcome != "allow" {
 		t.Fatalf("got %+v", got)
 	}
+}
+
+func TestEvaluateTraceIncludesMatchedRuleSource(t *testing.T) {
+	src := Source{Layer: "project", Path: "/repo/.cc-bash-proxy/cc-bash-proxy.yml"}
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Match: MatchSpec{Command: "git", Subcommand: "status"},
+			}},
+		},
+	}, src)
+
+	got, err := Evaluate(p, "git status")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if len(got.Trace) == 0 {
+		t.Fatalf("trace=%+v", got.Trace)
+	}
+	last := got.Trace[len(got.Trace)-1]
+	if last.Source == nil || *last.Source != src {
+		t.Fatalf("source=%+v want=%+v trace=%+v", last.Source, src, got.Trace)
+	}
+}
+
+func BenchmarkEvaluateManyRegexRules(b *testing.B) {
+	rules := make([]PermissionRuleSpec, 0, 250)
+	for i := 0; i < 249; i++ {
+		rules = append(rules, PermissionRuleSpec{Pattern: `^\s*cmd-` + fmtIntForBenchmark(i) + `\s+.*$`})
+	}
+	rules = append(rules, PermissionRuleSpec{Pattern: `^\s*git\s+status\s*$`})
+	p := NewPipeline(PipelineSpec{Permission: PermissionSpec{Allow: rules}}, Source{})
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		decision, err := Evaluate(p, "git status")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if decision.Outcome != "allow" {
+			b.Fatalf("decision=%+v", decision)
+		}
+	}
+}
+
+func fmtIntForBenchmark(v int) string {
+	return strconv.Itoa(v)
 }

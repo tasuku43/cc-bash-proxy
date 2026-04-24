@@ -22,6 +22,7 @@ an already-exercised distribution guarantee.
 - Workflow: `.github/workflows/release.yml`
 - Packaging: `.goreleaser.yaml`
 - Homebrew update script: `.github/scripts/update-homebrew-formula.sh`
+- Local preflight: `task release:preflight`
 
 ## Artifacts
 
@@ -38,8 +39,12 @@ GitHub Artifact Attestations provide a signed provenance record for the release
 artifacts. Consumers should be able to verify release provenance with:
 
 ```sh
-gh attestation verify path/to/cc-bash-proxy_<tag>_<os>_<arch>.tar.gz -R tasuku43/cmdguard
+gh attestation verify path/to/cc-bash-proxy_<tag>_<os>_<arch>.tar.gz -R tasuku43/cc-bash-proxy
 ```
+
+Use `task release:preflight` before pushing a tag. It runs formatting checks,
+`go vet`, `go test`, `govulncheck`, and `goreleaser check` so the GoReleaser
+configuration is validated without publishing artifacts.
 
 ## Release Invariants
 

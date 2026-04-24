@@ -124,7 +124,25 @@ option keeps both steps in one hook invocation:
 
 ### Permission Merge Rule
 
-`cc-bash-proxy` and Claude settings are merged with a migration compatibility rule.
+`cc-bash-proxy` and Claude settings are merged with an explicit mode. The
+default is `migration_compat` to preserve existing migration behavior.
+
+Set it at the top level of `cc-bash-proxy.yml`:
+
+```yaml
+claude_permission_merge_mode: strict
+```
+
+Supported values:
+
+- `migration_compat`: current coexistence behavior
+- `strict`: `deny > ask > allow`; `ask` is never upgraded to `allow`
+- `cc_bash_proxy_authoritative`: ignore Claude `allow` and `ask`, but still
+  honor Claude `deny`
+
+For new security-first setups, prefer `strict`. `migration_compat` exists for
+adopting `cc-bash-proxy` without immediately breaking existing Claude settings
+allow lists, and `doctor` reports it as a warning.
 
 Claude settings are interpreted as four states:
 
@@ -133,12 +151,13 @@ Claude settings are interpreted as four states:
 - `allow`
 - `abstain` (no matching rule)
 
-The final rule is:
+For `migration_compat`, the final rule is:
 
-- if either side returns `deny`, the final result is `deny`
-- else if either side explicitly returns `ask`, the final result is `ask`
-- else if either side returns `allow`, the final result is `allow`
-- otherwise the final result is `ask`
+- Claude `deny` always forces `deny`
+- Claude `ask` forces `ask` unless `cc-bash-proxy` already denied
+- Claude `allow` forces `allow` unless `cc-bash-proxy` already denied
+- Claude `abstain` keeps the `cc-bash-proxy` decision
+- if both sides abstain, the final result is `ask`
 
 The important combinations are:
 
@@ -162,8 +181,27 @@ The important combinations are:
 
 ## Release Verification
 
-The release pipeline, checksums, attestations, and Homebrew update path are
-designed and implemented, but the first GitHub Release may still be pending.
+Install from source:
+
+```sh
+go install github.com/tasuku43/cc-bash-proxy/cmd/cc-bash-proxy@latest
+```
+
+Install from a GitHub Release archive:
+
+```sh
+curl -LO https://github.com/tasuku43/cc-bash-proxy/releases/download/<tag>/cc-bash-proxy_<tag>_<os>_<arch>.tar.gz
+curl -LO https://github.com/tasuku43/cc-bash-proxy/releases/download/<tag>/checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+tar -xzf cc-bash-proxy_<tag>_<os>_<arch>.tar.gz
+```
+
+Verify provenance with GitHub Artifact Attestations:
+
+```sh
+gh attestation verify cc-bash-proxy_<tag>_<os>_<arch>.tar.gz -R tasuku43/cc-bash-proxy
+gh attestation verify checksums.txt -R tasuku43/cc-bash-proxy
+```
 
 Until a public release exists, prefer building from source and then running:
 

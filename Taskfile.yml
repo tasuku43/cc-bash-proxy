@@ -41,6 +41,7 @@ tasks:
       - task: vet
       - task: test
       - task: vulncheck
+      - go run github.com/goreleaser/goreleaser/v2@v2.12.7 check
 
   clean:
     desc: Remove the built binary from the repository root

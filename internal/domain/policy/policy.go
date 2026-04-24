@@ -12,9 +12,10 @@ import (
 )
 
 type PipelineSpec struct {
-	Rewrite    []RewriteStepSpec `yaml:"rewrite" json:"rewrite,omitempty"`
-	Permission PermissionSpec    `yaml:"permission" json:"permission,omitempty"`
-	Test       PipelineTestSpec  `yaml:"test" json:"test,omitempty"`
+	ClaudePermissionMergeMode string            `yaml:"claude_permission_merge_mode" json:"claude_permission_merge_mode,omitempty"`
+	Rewrite                   []RewriteStepSpec `yaml:"rewrite" json:"rewrite,omitempty"`
+	Permission                PermissionSpec    `yaml:"permission" json:"permission,omitempty"`
+	Test                      PipelineTestSpec  `yaml:"test" json:"test,omitempty"`
 }
 
 type RewriteStepSpec struct {
@@ -29,6 +30,7 @@ type RewriteStepSpec struct {
 	Strict           *bool             `yaml:"strict" json:"strict,omitempty"`
 	Continue         bool              `yaml:"continue" json:"continue,omitempty"`
 	Test             RewriteTestSpec   `yaml:"test" json:"test,omitempty"`
+	Source           Source            `yaml:"-" json:"source,omitempty"`
 }
 
 type PermissionSpec struct {
@@ -43,6 +45,7 @@ type PermissionRuleSpec struct {
 	Patterns []string           `yaml:"patterns" json:"patterns,omitempty"`
 	Message  string             `yaml:"message" json:"message,omitempty"`
 	Test     PermissionTestSpec `yaml:"test" json:"test,omitempty"`
+	Source   Source             `yaml:"-" json:"source,omitempty"`
 }
 
 type PermissionTestSpec struct {
@@ -100,7 +103,8 @@ type Source struct {
 
 type Pipeline struct {
 	PipelineSpec
-	Source Source `json:"source"`
+	Source   Source `json:"source"`
+	prepared preparedPipeline
 }
 
 type ValidationError struct {
@@ -120,56 +124,167 @@ type Decision struct {
 }
 
 type TraceStep struct {
-	Action   string `json:"action"`
-	Name     string `json:"name,omitempty"`
-	Effect   string `json:"effect,omitempty"`
-	From     string `json:"from,omitempty"`
-	To       string `json:"to,omitempty"`
-	Message  string `json:"message,omitempty"`
-	Relaxed  bool   `json:"relaxed,omitempty"`
-	Continue bool   `json:"continue,omitempty"`
+	Action   string  `json:"action"`
+	Name     string  `json:"name,omitempty"`
+	Effect   string  `json:"effect,omitempty"`
+	From     string  `json:"from,omitempty"`
+	To       string  `json:"to,omitempty"`
+	Message  string  `json:"message,omitempty"`
+	Relaxed  bool    `json:"relaxed,omitempty"`
+	Continue bool    `json:"continue,omitempty"`
+	Source   *Source `json:"source,omitempty"`
+}
+
+type preparedPipeline struct {
+	Ready   bool
+	Rewrite []preparedRewriteStep
+	Deny    []preparedPermissionRule
+	Ask     []preparedPermissionRule
+	Allow   []preparedPermissionRule
+}
+
+type preparedRewriteStep struct {
+	Spec     RewriteStepSpec
+	Selector preparedSelector
+}
+
+type preparedPermissionRule struct {
+	Spec     PermissionRuleSpec
+	Selector preparedSelector
+}
+
+type preparedSelector struct {
+	Match       MatchSpec
+	HasPattern  bool
+	Pattern     *regexp.Regexp
+	HasPatterns bool
+	Patterns    []*regexp.Regexp
 }
 
 func NewPipeline(spec PipelineSpec, src Source) Pipeline {
-	return Pipeline{PipelineSpec: spec, Source: src}
+	spec = stampSources(spec, src)
+	return Pipeline{PipelineSpec: spec, Source: src, prepared: preparePipeline(spec)}
+}
+
+func stampSources(spec PipelineSpec, src Source) PipelineSpec {
+	for i := range spec.Rewrite {
+		if spec.Rewrite[i].Source == (Source{}) {
+			spec.Rewrite[i].Source = src
+		}
+	}
+	for i := range spec.Permission.Deny {
+		if spec.Permission.Deny[i].Source == (Source{}) {
+			spec.Permission.Deny[i].Source = src
+		}
+	}
+	for i := range spec.Permission.Ask {
+		if spec.Permission.Ask[i].Source == (Source{}) {
+			spec.Permission.Ask[i].Source = src
+		}
+	}
+	for i := range spec.Permission.Allow {
+		if spec.Permission.Allow[i].Source == (Source{}) {
+			spec.Permission.Allow[i].Source = src
+		}
+	}
+	return spec
+}
+
+func preparePipeline(spec PipelineSpec) preparedPipeline {
+	prepared := preparedPipeline{Ready: true}
+	prepared.Rewrite = make([]preparedRewriteStep, 0, len(spec.Rewrite))
+	for _, step := range spec.Rewrite {
+		prepared.Rewrite = append(prepared.Rewrite, preparedRewriteStep{
+			Spec:     step,
+			Selector: prepareSelector(step.Match, step.Pattern, step.Patterns),
+		})
+	}
+	prepared.Deny = preparePermissionRules(spec.Permission.Deny)
+	prepared.Ask = preparePermissionRules(spec.Permission.Ask)
+	prepared.Allow = preparePermissionRules(spec.Permission.Allow)
+	return prepared
+}
+
+func preparePermissionRules(rules []PermissionRuleSpec) []preparedPermissionRule {
+	prepared := make([]preparedPermissionRule, 0, len(rules))
+	for _, rule := range rules {
+		prepared = append(prepared, preparedPermissionRule{
+			Spec:     rule,
+			Selector: prepareSelector(rule.Match, rule.Pattern, rule.Patterns),
+		})
+	}
+	return prepared
+}
+
+func prepareSelector(match MatchSpec, pattern string, patterns []string) preparedSelector {
+	selector := preparedSelector{Match: match}
+	if strings.TrimSpace(pattern) != "" {
+		selector.HasPattern = true
+		selector.Pattern, _ = regexp.Compile(pattern)
+	}
+	if len(patterns) > 0 {
+		selector.HasPatterns = true
+		selector.Patterns = make([]*regexp.Regexp, 0, len(patterns))
+		for _, p := range patterns {
+			re, err := regexp.Compile(p)
+			if err != nil {
+				selector.Patterns = append(selector.Patterns, nil)
+				continue
+			}
+			selector.Patterns = append(selector.Patterns, re)
+		}
+	}
+	return selector
+}
+
+func sourcePtr(src Source) *Source {
+	if src == (Source{}) {
+		return nil
+	}
+	return &src
 }
 
 func Evaluate(p Pipeline, command string) (Decision, error) {
 	current := command
 	trace := []TraceStep{}
+	prepared := p.prepared
+	if !prepared.Ready {
+		prepared = preparePipeline(stampSources(p.PipelineSpec, p.Source))
+	}
 
-	for _, step := range p.Rewrite {
-		if !RewriteStepMatches(step, current) {
+	for _, step := range prepared.Rewrite {
+		if !step.Selector.matches(current) {
 			continue
 		}
-		rewritten, ok := applyRewriteStep(step, current)
+		rewritten, ok := applyRewriteStep(step.Spec, current)
 		if !ok {
 			continue
 		}
 		trace = append(trace, TraceStep{
 			Action:   "rewrite",
-			Name:     rewritePrimitiveName(step),
+			Name:     rewritePrimitiveName(step.Spec),
 			From:     current,
 			To:       rewritten,
-			Relaxed:  !RewriteStrict(step),
-			Continue: step.Continue,
+			Relaxed:  !RewriteStrict(step.Spec),
+			Continue: step.Spec.Continue,
+			Source:   sourcePtr(step.Spec.Source),
 		})
 		current = rewritten
-		if !step.Continue {
+		if !step.Spec.Continue {
 			break
 		}
 	}
 
-	if rule, ok := firstPermissionMatch(p.Permission.Deny, current); ok {
-		trace = append(trace, TraceStep{Action: "permission", Effect: "deny", Message: rule.Message})
+	if rule, ok := firstPreparedPermissionMatch(prepared.Deny, current); ok {
+		trace = append(trace, TraceStep{Action: "permission", Effect: "deny", Message: rule.Message, Source: sourcePtr(rule.Source)})
 		return Decision{Outcome: "deny", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
 	}
-	if rule, ok := firstPermissionMatch(p.Permission.Ask, current); ok {
-		trace = append(trace, TraceStep{Action: "permission", Effect: "ask", Message: rule.Message})
+	if rule, ok := firstPreparedPermissionMatch(prepared.Ask, current); ok {
+		trace = append(trace, TraceStep{Action: "permission", Effect: "ask", Message: rule.Message, Source: sourcePtr(rule.Source)})
 		return Decision{Outcome: "ask", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
 	}
-	if rule, ok := firstAllowPermissionMatch(p.Permission.Allow, current); ok {
-		trace = append(trace, TraceStep{Action: "permission", Effect: "allow", Message: rule.Message})
+	if rule, ok := firstPreparedAllowPermissionMatch(prepared.Allow, current); ok {
+		trace = append(trace, TraceStep{Action: "permission", Effect: "allow", Message: rule.Message, Source: sourcePtr(rule.Source)})
 		return Decision{Outcome: "allow", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
 	}
 
@@ -177,22 +292,22 @@ func Evaluate(p Pipeline, command string) (Decision, error) {
 	return Decision{Outcome: "ask", Command: current, OriginalCommand: command, Trace: trace}, nil
 }
 
-func firstPermissionMatch(rules []PermissionRuleSpec, command string) (PermissionRuleSpec, bool) {
+func firstPreparedPermissionMatch(rules []preparedPermissionRule, command string) (PermissionRuleSpec, bool) {
 	for _, rule := range rules {
-		if PermissionRuleMatches(rule, command) {
-			return rule, true
+		if rule.Selector.matches(command) {
+			return rule.Spec, true
 		}
 	}
 	return PermissionRuleSpec{}, false
 }
 
-func firstAllowPermissionMatch(rules []PermissionRuleSpec, command string) (PermissionRuleSpec, bool) {
+func firstPreparedAllowPermissionMatch(rules []preparedPermissionRule, command string) (PermissionRuleSpec, bool) {
 	for _, rule := range rules {
-		if !allowRuleCanMatch(rule, command) {
+		if !allowRuleCanMatch(rule.Spec, command) {
 			continue
 		}
-		if PermissionRuleMatches(rule, command) {
-			return rule, true
+		if rule.Selector.matches(command) {
+			return rule.Spec, true
 		}
 	}
 	return PermissionRuleSpec{}, false
@@ -253,6 +368,27 @@ func selectorMatches(command string, match MatchSpec, pattern string, patterns [
 	case len(patterns) > 0:
 		for _, p := range patterns {
 			if patternMatches(command, p) {
+				return true
+			}
+		}
+		return false
+	default:
+		return true
+	}
+}
+
+func (s preparedSelector) matches(command string) bool {
+	switch {
+	case !IsZeroMatchSpec(s.Match):
+		return s.Match.MatchMatches(command)
+	case s.HasPattern:
+		if s.Pattern == nil {
+			return false
+		}
+		return s.Pattern.MatchString(command)
+	case s.HasPatterns:
+		for _, re := range s.Patterns {
+			if re != nil && re.MatchString(command) {
 				return true
 			}
 		}
@@ -330,6 +466,11 @@ func ValidatePipeline(spec PipelineSpec) []string {
 	var issues []string
 	if len(spec.Rewrite) == 0 && IsZeroPermissionSpec(spec.Permission) {
 		issues = append(issues, "must set at least one rewrite or permission entry")
+	}
+	switch strings.TrimSpace(spec.ClaudePermissionMergeMode) {
+	case "", "migration_compat", "strict", "cc_bash_proxy_authoritative":
+	default:
+		issues = append(issues, "claude_permission_merge_mode must be one of migration_compat, strict, or cc_bash_proxy_authoritative")
 	}
 	for i, step := range spec.Rewrite {
 		prefix := fmt.Sprintf("rewrite[%d]", i)

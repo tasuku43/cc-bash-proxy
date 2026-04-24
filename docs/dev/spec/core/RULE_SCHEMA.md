@@ -12,9 +12,12 @@ This document defines the current YAML schema for `cc-bash-proxy`.
 
 ## 2. Top-Level Shape
 
-The configuration file contains three top-level sections:
+The configuration file contains one optional top-level setting and three
+top-level sections:
 
 ```yaml
+claude_permission_merge_mode: strict
+
 rewrite:
   - match:
       command: aws
@@ -74,6 +77,12 @@ test:
 ```
 
 Unknown top-level keys are invalid.
+
+`claude_permission_merge_mode` is optional. Supported values are:
+
+- `migration_compat`
+- `strict`
+- `cc_bash_proxy_authoritative`
 
 ## 3. Rewrite Section
 

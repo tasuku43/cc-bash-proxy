@@ -19,11 +19,11 @@ func RunHook(raw []byte, useRTK bool, env Env) HookResult {
 		return HookResult{Payload: hookErrorPayload(claude.Tool, "invalid_input", err.Error())}
 	}
 
-	decision, err := evaluateDecision(req, env)
+	decision, mergeMode, err := evaluateDecision(req, env)
 	if err != nil {
 		return HookResult{Payload: hookErrorPayload(claude.Tool, "invalid_config", err.Error())}
 	}
-	decision = claude.ApplyPermissionBridge(claude.Tool, decision, env.Cwd, env.Home)
+	decision = claude.ApplyPermissionBridgeWithMode(claude.Tool, decision, env.Cwd, env.Home, mergeMode)
 	if useRTK && decision.Outcome != "deny" {
 		decision = applyRTKRewrite(decision)
 	}
@@ -31,7 +31,7 @@ func RunHook(raw []byte, useRTK bool, env Env) HookResult {
 	return HookResult{Payload: hookPayload(decision, req.Command)}
 }
 
-func evaluateDecision(req hookinput.ExecRequest, env Env) (policy.Decision, error) {
+func evaluateDecision(req hookinput.ExecRequest, env Env) (policy.Decision, string, error) {
 	loaded := configrepo.LoadEffectiveForHookTool(env.Cwd, env.Home, env.XDGConfigHome, env.XDGCacheHome, claude.Tool)
 	if len(loaded.Errors) > 0 {
 		if shouldAttemptImplicitVerify(loaded.Errors) {
@@ -40,11 +40,12 @@ func evaluateDecision(req hookinput.ExecRequest, env Env) (policy.Decision, erro
 			}
 		}
 		if len(loaded.Errors) > 0 {
-			return policy.Decision{}, errors.New(strings.Join(policy.ErrorStrings(loaded.Errors), "; "))
+			return policy.Decision{}, "", errors.New(strings.Join(policy.ErrorStrings(loaded.Errors), "; "))
 		}
 	}
 
-	return policy.Evaluate(loaded.Pipeline, req.Command)
+	decision, err := policy.Evaluate(loaded.Pipeline, req.Command)
+	return decision, loaded.Pipeline.ClaudePermissionMergeMode, err
 }
 
 func shouldAttemptImplicitVerify(errs []error) bool {
@@ -78,14 +79,17 @@ func hookPayload(decision policy.Decision, originalCommand string) map[string]an
 		if decision.Outcome == "allow" {
 			hookOutput["permissionDecision"] = "allow"
 		}
-		return map[string]any{
-			"systemMessage":      buildRewriteSystemMessage(decision),
+		payload := map[string]any{
 			"hookSpecificOutput": hookOutput,
 			"cc-bash-proxy": map[string]any{
 				"outcome": decision.Outcome,
 				"trace":   decision.Trace,
 			},
 		}
+		if message, ok := buildRewriteSystemMessage(decision); ok {
+			payload["systemMessage"] = message
+		}
+		return payload
 	case "deny":
 		reason := decision.Message
 		if strings.TrimSpace(reason) == "" {
@@ -132,10 +136,7 @@ func applyRTKRewrite(decision policy.Decision) policy.Decision {
 	return decision
 }
 
-func buildRewriteSystemMessage(decision policy.Decision) string {
-	if len(decision.Trace) == 0 {
-		return "cc-bash-proxy: rewrote -> " + decision.Command
-	}
+func buildRewriteSystemMessage(decision policy.Decision) (string, bool) {
 	ruleIDs := make([]string, 0, len(decision.Trace))
 	for _, step := range decision.Trace {
 		if step.Action != "rewrite" {
@@ -144,7 +145,7 @@ func buildRewriteSystemMessage(decision policy.Decision) string {
 		ruleIDs = append(ruleIDs, step.Name)
 	}
 	if len(ruleIDs) == 0 {
-		return "cc-bash-proxy: rewrote -> " + decision.Command
+		return "", false
 	}
-	return fmt.Sprintf("cc-bash-proxy: rewrote [%s] -> %s", strings.Join(ruleIDs, " -> "), decision.Command)
+	return fmt.Sprintf("cc-bash-proxy: rewrote [%s] -> %s", strings.Join(ruleIDs, " -> "), decision.Command), true
 }

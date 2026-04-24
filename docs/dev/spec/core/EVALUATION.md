@@ -35,16 +35,29 @@ invocation model that may include:
 - argument vector
 - subcommand
 - a limited set of launcher-style wrappers
+- shell AST classification for deciding whether structured `allow` matching is
+  safe
 
-Wrapper unwrapping is heuristic and intentionally limited. It is not a full
-shell AST.
+Structured `allow` rules only auto-allow commands that are classified as safe
+single-command expressions. Compound shell expressions such as `&&`, `;`, `|`,
+redirects, process substitution, or unsafe `bash -c` payloads fail closed to
+`ask` unless a pattern-based rule explicitly opts into matching that shell
+shape.
 
 ## 4. Configuration Source
 
-The current target config location is a single user-wide file:
+The effective policy is built from user-wide config first and project-local
+config second:
 
 - `$XDG_CONFIG_HOME/cc-bash-proxy/cc-bash-proxy.yml`
 - `~/.config/cc-bash-proxy/cc-bash-proxy.yml` when `XDG_CONFIG_HOME` is not set
+- `<project-root>/.cc-bash-proxy/cc-bash-proxy.yml`
+- `<project-root>/.cc-bash-proxy/cc-bash-proxy.yaml`
+
+Rules append in that source order. For permission rules, bucket priority still
+wins first (`deny -> ask -> allow`), then source order decides the first match
+inside the winning bucket. Trace entries include source metadata for matched
+rewrite and permission rules.
 
 ## 5. Rewrite Phase
 
@@ -95,6 +108,10 @@ This yields three runtime outcomes:
 - `ask`: the user should be prompted
 - `allow`: the command may proceed automatically
 
+Regex selectors are compiled when the policy is loaded into its runtime form.
+Runtime evaluation uses the prepared policy model rather than compiling regexes
+for each hook invocation.
+
 ## 7. Hook Behavior
 
 `cc-bash-proxy hook` maps the final permission outcome into Claude hook JSON:
@@ -105,6 +122,14 @@ This yields three runtime outcomes:
 
 If `--rtk` is enabled, the `rtk` rewrite runs only after `cc-bash-proxy` has
 already decided the permission outcome.
+
+Claude settings merge behavior is controlled by `claude_permission_merge_mode`:
+
+- `migration_compat` is the default and preserves the existing coexistence
+  behavior, including Claude `allow` upgrading `cc-bash-proxy` `ask`
+- `strict` applies `deny > ask > allow`, so `ask` is never upgraded to `allow`
+- `cc_bash_proxy_authoritative` ignores Claude `allow` and `ask`, but still
+  honors Claude `deny`
 
 ## 8. Testing Model
 

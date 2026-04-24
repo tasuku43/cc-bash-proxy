@@ -32,6 +32,21 @@ type hookEnvSpec struct {
 
 func runClaudeHookTest(t *testing.T, spec hookEnvSpec) hookPayload {
 	t.Helper()
+	payload := runClaudeHookMapTest(t, spec)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json marshal error: %v", err)
+	}
+
+	var typed hookPayload
+	if err := json.Unmarshal(data, &typed); err != nil {
+		t.Fatalf("json error: %v", err)
+	}
+	return typed
+}
+
+func runClaudeHookMapTest(t *testing.T, spec hookEnvSpec) map[string]any {
+	t.Helper()
 	home := t.TempDir()
 	cwd := t.TempDir()
 
@@ -63,7 +78,7 @@ func runClaudeHookTest(t *testing.T, spec hookEnvSpec) hookPayload {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
 
-	var payload hookPayload
+	var payload map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("json error: %v stdout=%s", err, stdout.String())
 	}
@@ -166,6 +181,89 @@ test:
 	}
 }
 
+func TestRunHookClaudeAllowWithoutRewriteOmitsRewriteSystemMessage(t *testing.T) {
+	payload := runClaudeHookMapTest(t, hookEnvSpec{
+		UserConfig: `permission:
+  allow:
+    - match:
+        command: git
+        subcommand: status
+      test:
+        allow:
+          - "git status"
+        pass:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`,
+		Command: "git status",
+	})
+	if _, ok := payload["systemMessage"]; ok {
+		t.Fatalf("expected no rewrite systemMessage, payload=%+v", payload)
+	}
+}
+
+func TestRunHookClaudeAskWithoutRewriteOmitsRewriteSystemMessage(t *testing.T) {
+	payload := runClaudeHookMapTest(t, hookEnvSpec{
+		UserConfig: `permission:
+  ask:
+    - match:
+        command: git
+        subcommand: status
+      test:
+        ask:
+          - "git status"
+        pass:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: ask
+`,
+		Command: "git status",
+	})
+	if _, ok := payload["systemMessage"]; ok {
+		t.Fatalf("expected no rewrite systemMessage, payload=%+v", payload)
+	}
+}
+
+func TestRunHookClaudeRewriteIncludesRewriteSystemMessage(t *testing.T) {
+	payload := runClaudeHookMapTest(t, hookEnvSpec{
+		UserConfig: `rewrite:
+  - match:
+      command: aws
+      args_contains: ["--profile"]
+    move_flag_to_env:
+      flag: "--profile"
+      env: "AWS_PROFILE"
+    test:
+      - in: "aws --profile dev sts get-caller-identity"
+        out: "AWS_PROFILE=dev aws sts get-caller-identity"
+      - pass: "AWS_PROFILE=dev aws sts get-caller-identity"
+permission:
+  allow:
+    - match:
+        command: aws
+        subcommand: sts
+        env_requires: ["AWS_PROFILE"]
+      test:
+        allow:
+          - "AWS_PROFILE=dev aws sts get-caller-identity"
+        pass:
+          - "aws sts get-caller-identity"
+test:
+  - in: "aws --profile dev sts get-caller-identity"
+    rewritten: "AWS_PROFILE=dev aws sts get-caller-identity"
+    decision: allow
+`,
+		Command: "aws --profile dev sts get-caller-identity",
+	})
+	message, ok := payload["systemMessage"].(string)
+	if !ok || !strings.Contains(message, "rewrote") {
+		t.Fatalf("expected rewrite systemMessage, payload=%+v", payload)
+	}
+}
+
 func TestRunHookClaudeAllowRemainsAllowWithoutClaudeSettingsMatch(t *testing.T) {
 	home := t.TempDir()
 	writeUserConfig(t, home, `permission:
@@ -243,6 +341,102 @@ test:
 	hookOut := payload["hookSpecificOutput"].(map[string]any)
 	if hookOut["permissionDecision"] != "allow" {
 		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestRunHookClaudeStrictMergeDoesNotUpgradeAskToAllow(t *testing.T) {
+	payload := runClaudeHookTest(t, hookEnvSpec{
+		UserConfig: `claude_permission_merge_mode: strict
+permission:
+  ask:
+    - match:
+        command: git
+        subcommand: status
+      test:
+        ask:
+          - "git status"
+        pass:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: ask
+`,
+		ClaudeSettings: `{
+  "permissions": {
+    "allow": ["Bash(git status)"]
+  }
+}`,
+		Command: "git status",
+	})
+	if _, ok := payload.HookSpecificOutput["permissionDecision"]; ok {
+		t.Fatalf("strict mode should keep ask, payload=%+v", payload)
+	}
+	if payload.Cmdproxy["outcome"] != "ask" {
+		t.Fatalf("outcome=%v payload=%+v", payload.Cmdproxy["outcome"], payload)
+	}
+}
+
+func TestRunHookClaudeAuthoritativeMergeIgnoresClaudeAsk(t *testing.T) {
+	payload := runClaudeHookTest(t, hookEnvSpec{
+		UserConfig: `claude_permission_merge_mode: cc_bash_proxy_authoritative
+permission:
+  allow:
+    - match:
+        command: git
+        subcommand: status
+      test:
+        allow:
+          - "git status"
+        pass:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`,
+		ClaudeSettings: `{
+  "permissions": {
+    "ask": ["Bash(git status)"]
+  }
+}`,
+		Command: "git status",
+	})
+	if payload.HookSpecificOutput["permissionDecision"] != "allow" {
+		t.Fatalf("authoritative mode should keep cc-bash-proxy allow, payload=%+v", payload)
+	}
+	if payload.Cmdproxy["outcome"] != "allow" {
+		t.Fatalf("outcome=%v payload=%+v", payload.Cmdproxy["outcome"], payload)
+	}
+}
+
+func TestRunHookClaudeAuthoritativeMergeStillHonorsClaudeDeny(t *testing.T) {
+	payload := runClaudeHookTest(t, hookEnvSpec{
+		UserConfig: `claude_permission_merge_mode: cc_bash_proxy_authoritative
+permission:
+  allow:
+    - match:
+        command: git
+        subcommand: status
+      test:
+        allow:
+          - "git status"
+        pass:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`,
+		ClaudeSettings: `{
+  "permissions": {
+    "deny": ["Bash(git status)"]
+  }
+}`,
+		Command: "git status",
+	})
+	if payload.HookSpecificOutput["permissionDecision"] != "deny" {
+		t.Fatalf("authoritative mode should still honor Claude deny, payload=%+v", payload)
+	}
+	if payload.Cmdproxy["outcome"] != "deny" {
+		t.Fatalf("outcome=%v payload=%+v", payload.Cmdproxy["outcome"], payload)
 	}
 }
 
@@ -558,6 +752,10 @@ test:
 	updatedInput := hookOut["updatedInput"].(map[string]any)
 	if updatedInput["command"] != "rtk git diff goal.md" {
 		t.Fatalf("payload = %+v", payload)
+	}
+	message, ok := payload["systemMessage"].(string)
+	if !ok || !strings.Contains(message, "rtk") {
+		t.Fatalf("expected rtk rewrite systemMessage, payload=%+v", payload)
 	}
 }
 
