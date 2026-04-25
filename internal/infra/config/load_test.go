@@ -30,10 +30,17 @@ func TestLoadEffectiveUsesUserConfig(t *testing.T) {
       - pass: "AWS_PROFILE=dev aws sts get-caller-identity"
 permission:
   allow:
-    - match:
-        command: aws
-        subcommand: sts
-        env_requires: ["AWS_PROFILE"]
+    - command:
+
+        name: aws
+
+        semantic:
+
+          service: sts
+
+      env:
+
+        requires: ["AWS_PROFILE"]
       test:
         allow:
           - "AWS_PROFILE=dev aws sts get-caller-identity"
@@ -79,10 +86,17 @@ func TestLoadEffectiveForToolMergesUserAndProjectConfig(t *testing.T) {
         out: "AWS_PROFILE=dev aws sts get-caller-identity"
 permission:
   allow:
-    - match:
-        command: aws
-        subcommand: sts
-        env_requires: ["AWS_PROFILE"]
+    - command:
+
+        name: aws
+
+        semantic:
+
+          service: sts
+
+      env:
+
+        requires: ["AWS_PROFILE"]
       test:
         allow:
           - "AWS_PROFILE=dev aws sts get-caller-identity"
@@ -102,7 +116,9 @@ test:
 	}
 	if err := os.WriteFile(localPath, []byte(`permission:
   deny:
-    - pattern: '^\s*git\s+push'
+    - patterns:
+
+        - '^\s*git\s+push'
       message: "push blocked"
       test:
         deny:
@@ -150,9 +166,13 @@ func TestLoadEffectiveForToolProjectOverridesClaudeMergeMode(t *testing.T) {
 	if err := os.WriteFile(userPath, []byte(`claude_permission_merge_mode: strict
 permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -171,9 +191,13 @@ test:
 	if err := os.WriteFile(localPath, []byte(`claude_permission_merge_mode: cc_bash_proxy_authoritative
 permission:
   ask:
-    - match:
-        command: git
-        subcommand: push
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: push
       test:
         ask:
           - "git push"
@@ -206,9 +230,13 @@ func TestLoadEffectiveRejectsPermissionCompositionConfig(t *testing.T) {
     allow:
       - pipeline
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -240,8 +268,10 @@ func TestLoadEffectiveRejectsInvalidGhSemanticYAML(t *testing.T) {
 			name: "unsupported semantic field for gh",
 			body: `permission:
   deny:
-    - match:
-        command: gh
+    - command:
+
+        name: gh
+
         semantic:
           service: sts
       test:
@@ -259,8 +289,10 @@ test:
 			name: "unsupported bool type",
 			body: `permission:
   deny:
-    - match:
-        command: gh
+    - command:
+
+        name: gh
+
         semantic:
           paginate: "true"
 test:
@@ -273,8 +305,10 @@ test:
 			name: "nested semantic gh form",
 			body: `permission:
   deny:
-    - match:
-        command: gh
+    - command:
+
+        name: gh
+
         semantic:
           gh:
             area: api
@@ -321,8 +355,8 @@ func TestLoadFileForEvalIfPresentSupportsStripCommandPath(t *testing.T) {
       - pass: "ls -R foo"
 permission:
   allow:
-    - match:
-        command: ls
+    - command:
+        name: ls
       test:
         allow:
           - "ls -R foo"
@@ -356,9 +390,13 @@ func TestVerifyFileWritesVerifiedArtifactAndHookLoadsIt(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	body := `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -436,8 +474,9 @@ func TestVerifyFileRejectsInvalidSemanticSchema(t *testing.T) {
 			name: "unknown semantic field",
 			body: `permission:
   deny:
-    - match:
-        command: git
+    - command:
+
+        name: git
         semantic:
           namespace: prod
       test:
@@ -453,8 +492,9 @@ test:
 			name: "unsupported semantic type",
 			body: `permission:
   deny:
-    - match:
-        command: git
+    - command:
+
+        name: git
         semantic:
           force: "true"
       test:
@@ -470,8 +510,10 @@ test:
 			name: "unknown aws semantic field",
 			body: `permission:
   deny:
-    - match:
-        command: aws
+    - command:
+
+        name: aws
+
         semantic:
           namespace: prod
       test:
@@ -487,8 +529,10 @@ test:
 			name: "unsupported aws semantic type",
 			body: `permission:
   deny:
-    - match:
-        command: aws
+    - command:
+
+        name: aws
+
         semantic:
           dry_run: "false"
       test:
@@ -504,8 +548,10 @@ test:
 			name: "nested aws semantic key",
 			body: `permission:
   deny:
-    - match:
-        command: aws
+    - command:
+
+        name: aws
+
         semantic:
           aws:
             service: sts
@@ -522,8 +568,10 @@ test:
 			name: "unknown kubectl semantic field",
 			body: `permission:
   deny:
-    - match:
-        command: kubectl
+    - command:
+
+        name: kubectl
+
         semantic:
           service: s3
       test:
@@ -539,8 +587,10 @@ test:
 			name: "unsupported kubectl semantic type",
 			body: `permission:
   deny:
-    - match:
-        command: kubectl
+    - command:
+
+        name: kubectl
+
         semantic:
           all_namespaces: "true"
       test:
@@ -556,8 +606,10 @@ test:
 			name: "nested kubectl semantic key",
 			body: `permission:
   deny:
-    - match:
-        command: kubectl
+    - command:
+
+        name: kubectl
+
         semantic:
           kubectl:
             verb: get
@@ -574,8 +626,10 @@ test:
 			name: "unknown helmfile semantic field",
 			body: `permission:
   deny:
-    - match:
-        command: helmfile
+    - command:
+
+        name: helmfile
+
         semantic:
           service: sts
       test:
@@ -591,8 +645,10 @@ test:
 			name: "unsupported helmfile semantic type",
 			body: `permission:
   deny:
-    - match:
-        command: helmfile
+    - command:
+
+        name: helmfile
+
         semantic:
           interactive: "true"
       test:
@@ -608,8 +664,10 @@ test:
 			name: "nested helmfile semantic key",
 			body: `permission:
   deny:
-    - match:
-        command: helmfile
+    - command:
+
+        name: helmfile
+
         semantic:
           helmfile:
             verb: sync
@@ -668,8 +726,9 @@ func TestLoadVerifiedFileForHookRejectsMismatchedEvaluationSemantics(t *testing.
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	body := `permission:
   allow:
-    - match:
-        command: git
+    - command:
+
+        name: git
       test:
         allow: ["git status"]
         pass: ["pwd"]
@@ -698,8 +757,9 @@ func TestLoadVerifiedFileForHookRejectsUnsafeCachePermissions(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	body := `permission:
   allow:
-    - match:
-        command: git
+    - command:
+
+        name: git
       test:
         allow: ["git status"]
         pass: ["pwd"]
@@ -746,9 +806,13 @@ func TestVerifyFileSupportsCompoundCommandAsExplicitAskE2E(t *testing.T) {
 	cacheDir := t.TempDir()
 	body := `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -780,8 +844,9 @@ func TestLoadVerifiedFileForHookFailsWhenArtifactMissing(t *testing.T) {
 	path := filepath.Join(dir, "cc-bash-proxy.yml")
 	body := `permission:
   allow:
-    - match:
-        command: git
+    - command:
+
+        name: git
       test:
         allow: ["git status"]
         pass: ["pwd"]
@@ -813,9 +878,13 @@ func TestVerifyEffectiveToAllCachesIncludesToolSettingsFingerprint(t *testing.T)
 	}
 	if err := os.WriteFile(configPath, []byte(`permission:
   ask:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         ask:
           - "git status"
@@ -881,9 +950,13 @@ func TestLoadEffectiveForHookToolRejectsMismatchedEvaluationSemantics(t *testing
 	}
 	if err := os.WriteFile(configPath, []byte(`permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"

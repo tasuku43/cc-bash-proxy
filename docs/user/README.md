@@ -16,7 +16,11 @@ Start here if your goal is to use `cc-bash-proxy` in local workflows.
 
 ## Semantic Rule Help
 
-`match.semantic` is command-specific and selected by exact `match.command`.
+Permission rules use `command`, `env`, and `patterns`. `pattern` does not
+exist, and permission `match` does not exist; rewrite `match` is separate and
+unchanged. Permission `command` does not support `command_in`.
+
+`command.semantic` is command-specific and selected by exact `command.name`.
 Supported semantic commands are exposed by:
 
 ```sh
@@ -25,7 +29,7 @@ cc-bash-proxy help semantic git
 cc-bash-proxy semantic-schema --format json
 ```
 
-Use `args_contains` / `args_prefixes` for legacy raw-word matching, and
+Use `patterns` for raw command regex matching. Use
 `semantic.flags_contains` / `semantic.flags_prefixes` for flags recognized by a
 command-specific semantic parser.
 

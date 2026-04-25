@@ -38,15 +38,12 @@ invocation model that may include:
 - shell AST classification for deciding whether structured `allow` matching is
   safe
 
-Structured `allow` rules only auto-allow commands that are classified as safe
+`command` and `patterns` `allow` rules only auto-allow commands that are classified as safe
 for evaluation. Safe evaluation requires no parser diagnostics, a supported
 shell shape, and an AST-safe simple command for each command that would be
 allowed. Syntax parse errors, diagnostics, unknown shapes, redirects,
 subshells, background execution, command substitution, process substitution,
-and unsafe `bash -c` payloads fail closed to `ask`. Pattern-based `allow` rules
-follow the same gate by default. `allow_unsafe_shell: true` can opt into
-full-command raw allow only after the command passes this fail-closed
-evaluation safety gate.
+and unsafe `bash -c` payloads fail closed to `ask`.
 
 ## 4. Configuration Source
 
@@ -115,9 +112,8 @@ The full effective order is fixed:
 7. evaluate `CommandPlan` composition for non-simple shell expressions
 8. return the default outcome, `ask`
 
-Raw/full-command rules include both structured `match` selectors and raw
-`pattern` / `patterns` selectors evaluated against the whole rewritten command
-string. The bucket order is therefore:
+Permission rules use `command`, `env`, and `patterns`. `patterns` is evaluated
+against the whole rewritten command string. The bucket order is therefore:
 
 1. `deny`
 2. `ask`
@@ -134,11 +130,7 @@ structured-safe for automatic allow. Supported compound lists and pipelines may
 be allowed only through composition, where every extracted command must be
 individually safe and allowed. Syntax parse errors, diagnostics, redirects,
 subshells, background execution, unknown shell shapes, command substitution,
-process substitution, and unsafe AST forms never reach allow matching. An
-`allow` rule with
-`allow_unsafe_shell: true` opts into raw full-command allow for supported
-safe-for-evaluation shapes, but it cannot override parse errors, diagnostics,
-or unsupported shell shapes.
+process substitution, and unsafe AST forms never reach allow matching.
 
 If nothing matches, the default outcome is `ask`.
 
@@ -235,13 +227,12 @@ so mixed structures such as pipeline plus subshell plus redirection remain
 visible to fail-closed logic. Trace entries for `fail_closed` and `composition`
 include both `shape` and `shape_flags`.
 
-Raw `deny` and raw `ask` pattern rules can block or require confirmation for a
+`patterns` deny and ask rules can block or require confirmation for a
 full compound command even when each extracted command would otherwise be
 individually allowed. Unsafe commands record a `fail_closed` trace step before
 permission matching continues. Deny rules still apply to unsafe commands,
-including extracted commands when available. Raw `allow` pattern rules do not
-bypass shell safety by default; with `allow_unsafe_shell: true`, they can allow
-only commands that still pass the fail-closed evaluation safety gate.
+including extracted commands when available. `patterns` allow rules do not
+bypass shell safety.
 
 For `simple`, the existing structured allow behavior applies.
 

@@ -111,8 +111,8 @@ decision from `deny` to `allow`.
 Trace output must include `Parser` for every parsed command. Commands with
 CLI-specific semantics also set `SemanticParser`.
 
-`match.semantic` is interpreted by exact `match.command`. For example,
-`command: gh` uses the gh semantic schema directly under `semantic`; nested
+`command.semantic` is interpreted by exact `command.name`. For example,
+`name: gh` uses the gh semantic schema directly under `semantic`; nested
 forms such as `semantic.gh.area` or `semantic.helmfile.verb` are invalid.
 Semantic matchers are
 permission-only and are not supported for rewrite selectors.

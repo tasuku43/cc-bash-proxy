@@ -25,12 +25,11 @@ func TestHelpMatchExplainsSemantic(t *testing.T) {
 	for _, want := range []string{
 		"semantic",
 		"cc-bash-proxy help semantic",
-		"match",
-		"pattern",
+		"Permission rules do not use match or pattern",
 		"patterns",
-		"permission rule match blocks",
-		"rewrite.match.semantic is unsupported",
-		"args_contains",
+		"rewrite.match is separate and unchanged",
+		"semantic: unsupported for rewrite.match",
+		"command.name",
 		"semantic.flags_contains",
 	} {
 		if !strings.Contains(stdout, want) {
@@ -66,7 +65,7 @@ func TestHelpSemanticGitShowsSchema(t *testing.T) {
 		"--force-with-lease",
 		"Examples:",
 		"Validation rules:",
-		"command_in + semantic is invalid",
+		"command.semantic requires exact command.name",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("help semantic git missing %q:\n%s", want, stdout)

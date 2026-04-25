@@ -41,8 +41,8 @@ func TestRunPassesWhenPipelineTestsMatch(t *testing.T) {
 		Pipeline: policy.NewPipeline(policy.PipelineSpec{
 			Permission: policy.PermissionSpec{
 				Allow: []policy.PermissionRuleSpec{{
-					Match: policy.MatchSpec{Command: "git", Subcommand: "status"},
-					Test:  policy.PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
+					Command: policy.PermissionCommandSpec{Name: "git", Semantic: &policy.SemanticMatchSpec{Verb: "status"}},
+					Test:    policy.PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
 				}},
 			},
 			Test: policy.PipelineTestSpec{{In: "git status", Decision: "allow"}},
@@ -59,8 +59,8 @@ func TestRunDefaultsToStrictClaudeMergeMode(t *testing.T) {
 		Pipeline: policy.NewPipeline(policy.PipelineSpec{
 			Permission: policy.PermissionSpec{
 				Allow: []policy.PermissionRuleSpec{{
-					Match: policy.MatchSpec{Command: "git", Subcommand: "status"},
-					Test:  policy.PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
+					Command: policy.PermissionCommandSpec{Name: "git", Semantic: &policy.SemanticMatchSpec{Verb: "status"}},
+					Test:    policy.PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
 				}},
 			},
 			Test: policy.PipelineTestSpec{{In: "git status", Decision: "allow"}},
@@ -81,8 +81,8 @@ func TestRunWarnsOnMigrationCompatClaudeMergeMode(t *testing.T) {
 			ClaudePermissionMergeMode: "migration_compat",
 			Permission: policy.PermissionSpec{
 				Allow: []policy.PermissionRuleSpec{{
-					Match: policy.MatchSpec{Command: "git", Subcommand: "status"},
-					Test:  policy.PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
+					Command: policy.PermissionCommandSpec{Name: "git", Semantic: &policy.SemanticMatchSpec{Verb: "status"}},
+					Test:    policy.PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
 				}},
 			},
 			Test: policy.PipelineTestSpec{{In: "git status", Decision: "allow"}},
@@ -103,8 +103,8 @@ func TestRunPassesOnStrictClaudeMergeMode(t *testing.T) {
 			ClaudePermissionMergeMode: "strict",
 			Permission: policy.PermissionSpec{
 				Allow: []policy.PermissionRuleSpec{{
-					Match: policy.MatchSpec{Command: "git", Subcommand: "status"},
-					Test:  policy.PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
+					Command: policy.PermissionCommandSpec{Name: "git", Semantic: &policy.SemanticMatchSpec{Verb: "status"}},
+					Test:    policy.PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
 				}},
 			},
 			Test: policy.PipelineTestSpec{{In: "git status", Decision: "allow"}},
@@ -119,25 +119,19 @@ func TestRunPassesOnStrictClaudeMergeMode(t *testing.T) {
 	}
 }
 
-func TestRunWarnsOnExplicitUnsafeAllow(t *testing.T) {
+func TestRunWarnsOnEnvOnlyAllow(t *testing.T) {
 	loaded := configrepo.Loaded{
 		Pipeline: policy.NewPipeline(policy.PipelineSpec{
 			Permission: policy.PermissionSpec{
 				Allow: []policy.PermissionRuleSpec{{
-					Pattern:          `^\s*git\s+status\s*\|\s*sh$`,
-					AllowUnsafeShell: true,
-					Message:          "allow trusted pipeline",
-					Test: policy.PermissionTestSpec{
-						Allow: []string{"git status | sh"},
-						Pass:  []string{"git status"},
-					},
+					Env:  policy.PermissionEnvSpec{Requires: []string{"AWS_PROFILE"}},
+					Test: policy.PermissionTestSpec{Allow: []string{"AWS_PROFILE=dev git status"}, Pass: []string{"git status"}},
 				}},
 			},
-			Test: policy.PipelineTestSpec{{In: "git status | sh", Decision: "allow"}},
 		}, policy.Source{}),
 	}
 	report := Run(loaded, "claude", t.TempDir(), t.TempDir())
-	if !hasCheck(report, "permission.unsafe-shell-allow", StatusWarn) {
+	if !hasCheck(report, "permission.env-only-allow", StatusWarn) {
 		t.Fatalf("checks = %+v", report.Checks)
 	}
 }

@@ -126,10 +126,17 @@ func TestRunHookClaudeAllowReturnsAllowAndUpdatedInput(t *testing.T) {
       - pass: "AWS_PROFILE=dev aws sts get-caller-identity"
 permission:
   allow:
-    - match:
-        command: aws
-        subcommand: sts
-        env_requires: ["AWS_PROFILE"]
+    - command:
+
+        name: aws
+
+        semantic:
+
+          service: sts
+
+      env:
+
+        requires: ["AWS_PROFILE"]
       test:
         allow:
           - "AWS_PROFILE=dev aws sts get-caller-identity"
@@ -169,9 +176,13 @@ func TestRunHookClaudeAskOmitsPermissionDecision(t *testing.T) {
 	home := t.TempDir()
 	writeUserConfig(t, home, `permission:
   ask:
-    - match:
-        command: aws
-        subcommand: s3
+    - command:
+
+        name: aws
+
+        semantic:
+
+          service: s3
       test:
         ask:
           - "aws s3 ls"
@@ -206,9 +217,13 @@ func TestRunHookClaudeAllowWithoutRewriteOmitsRewriteSystemMessage(t *testing.T)
 	payload := runClaudeHookMapTest(t, hookEnvSpec{
 		UserConfig: `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -229,9 +244,13 @@ func TestRunHookClaudeAskWithoutRewriteOmitsRewriteSystemMessage(t *testing.T) {
 	payload := runClaudeHookMapTest(t, hookEnvSpec{
 		UserConfig: `permission:
   ask:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         ask:
           - "git status"
@@ -263,10 +282,17 @@ func TestRunHookClaudeRewriteIncludesRewriteSystemMessage(t *testing.T) {
       - pass: "AWS_PROFILE=dev aws sts get-caller-identity"
 permission:
   allow:
-    - match:
-        command: aws
-        subcommand: sts
-        env_requires: ["AWS_PROFILE"]
+    - command:
+
+        name: aws
+
+        semantic:
+
+          service: sts
+
+      env:
+
+        requires: ["AWS_PROFILE"]
       test:
         allow:
           - "AWS_PROFILE=dev aws sts get-caller-identity"
@@ -289,9 +315,13 @@ func TestRunHookClaudeAllowRemainsAllowWithoutClaudeSettingsMatch(t *testing.T) 
 	home := t.TempDir()
 	writeUserConfig(t, home, `permission:
   allow:
-    - match:
-        command: git
-        subcommand: diff
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: diff
       test:
         allow:
           - "git diff goal.md"
@@ -332,10 +362,17 @@ func TestRunHookClaudeMigrationCompatSettingsAllowUpgradesAskToAllow(t *testing.
 	writeUserConfig(t, home, `claude_permission_merge_mode: migration_compat
 permission:
   ask:
-    - match:
-        command: git
-        args_contains:
-          - "-s"
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
+
+          flags_contains:
+
+            - "-s"
       test:
         ask:
           - "git status -s"
@@ -371,9 +408,13 @@ func TestRunHookClaudeStrictMergeDoesNotUpgradeAskToAllow(t *testing.T) {
 		UserConfig: `claude_permission_merge_mode: strict
 permission:
   ask:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         ask:
           - "git status"
@@ -405,9 +446,13 @@ func TestRunHookClaudeDefaultMergeDoesNotUpgradeAskToAllow(t *testing.T) {
 	payload := runClaudeHookTest(t, hookEnvSpec{
 		UserConfig: `permission:
   ask:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         ask:
           - "git status"
@@ -440,9 +485,13 @@ func TestRunHookClaudeMigrationCompatExplicitlyUpgradesAskToAllow(t *testing.T) 
 		UserConfig: `claude_permission_merge_mode: migration_compat
 permission:
   ask:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         ask:
           - "git status"
@@ -475,9 +524,13 @@ func TestRunHookClaudeAuthoritativeMergeIgnoresClaudeAsk(t *testing.T) {
 		UserConfig: `claude_permission_merge_mode: cc_bash_proxy_authoritative
 permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -507,9 +560,13 @@ func TestRunHookClaudeAuthoritativeMergeStillHonorsClaudeDeny(t *testing.T) {
 		UserConfig: `claude_permission_merge_mode: cc_bash_proxy_authoritative
 permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -553,9 +610,13 @@ func TestRunHookClaudePermissionMergeMatrix(t *testing.T) {
 			name: "deny beats allow",
 			cmdproxyPermission: `permission:
   deny:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         deny:
           - "git status"
@@ -580,9 +641,13 @@ test:
 			name: "settings allow does not upgrade ask by default",
 			cmdproxyPermission: `permission:
   ask:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         ask:
           - "git status"
@@ -611,9 +676,13 @@ test:
 			name: "settings allow fills cc-bash-proxy no match in strict mode",
 			cmdproxyPermission: `permission:
   allow:
-    - match:
-        command: aws
-        subcommand: sts
+    - command:
+
+        name: aws
+
+        semantic:
+
+          service: sts
       test:
         allow:
           - "aws sts get-caller-identity"
@@ -642,9 +711,13 @@ test:
 			name: "settings deny beats cc-bash-proxy allow",
 			cmdproxyPermission: `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -669,9 +742,13 @@ test:
 			name: "explicit ask beats allow",
 			cmdproxyPermission: `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -696,9 +773,13 @@ test:
 			name: "settings ask fills cc-bash-proxy no match",
 			cmdproxyPermission: `permission:
   allow:
-    - match:
-        command: aws
-        subcommand: sts
+    - command:
+
+        name: aws
+
+        semantic:
+
+          service: sts
       test:
         allow:
           - "aws sts get-caller-identity"
@@ -727,9 +808,13 @@ test:
 			name: "cc-bash-proxy allow plus settings abstain stays allow",
 			cmdproxyPermission: `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -750,9 +835,13 @@ test:
 			name: "both abstain become ask",
 			cmdproxyPermission: `permission:
   allow:
-    - match:
-        command: aws
-        subcommand: sts
+    - command:
+
+        name: aws
+
+        semantic:
+
+          service: sts
       test:
         allow:
           - "aws sts get-caller-identity"
@@ -777,9 +866,13 @@ test:
 			name: "cc-bash-proxy ask plus settings abstain stays ask",
 			cmdproxyPermission: `permission:
   ask:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         ask:
           - "git status"
@@ -847,9 +940,13 @@ rewrite:
         out: "AWS_PROFILE=dev aws sts get-caller-identity"
 permission:
   ask:
-    - match:
-        command: aws
-        subcommand: sts
+    - command:
+
+        name: aws
+
+        semantic:
+
+          service: sts
       test:
         ask:
           - "AWS_PROFILE=dev aws sts get-caller-identity"
@@ -862,7 +959,9 @@ test:
 `,
 		LocalConfig: `permission:
   deny:
-    - pattern: '^\s*git\s+push'
+    - patterns:
+
+        - '^\s*git\s+push'
       message: "push blocked"
       test:
         deny:
@@ -912,9 +1011,13 @@ func TestRunHookClaudeRTKEvaluatesPermissionsBeforeRTKRewrite(t *testing.T) {
 }`)
 	writeUserConfig(t, home, `permission:
   allow:
-    - match:
-        command: git
-        subcommand: diff
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: diff
       test:
         allow:
           - "git diff goal.md"
@@ -957,8 +1060,9 @@ func TestRunHookClaudeDenyReturnsDeny(t *testing.T) {
 	home := t.TempDir()
 	writeUserConfig(t, home, `permission:
   deny:
-    - match:
-        command: rm
+    - command:
+
+        name: rm
       message: "rm blocked"
       test:
         deny:
@@ -1003,9 +1107,13 @@ func TestRunHookClaudeDeniesWhenArtifactMissingByDefault(t *testing.T) {
       - pass: "bash script.sh"
 permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -1045,9 +1153,13 @@ func TestRunHookClaudeDeniesWhenArtifactStaleByDefault(t *testing.T) {
 	cwd := t.TempDir()
 	writeUserConfig(t, home, `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -1062,9 +1174,13 @@ test:
 	}
 	writeUserConfig(t, home, `permission:
   allow:
-    - match:
-        command: git
-        subcommand: diff
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: diff
       test:
         allow:
           - "git diff"
@@ -1104,9 +1220,13 @@ func TestRunHookClaudeDeniesWhenArtifactEvaluationSemanticsIncompatible(t *testi
 	cacheHome := t.TempDir()
 	writeUserConfig(t, home, `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -1157,9 +1277,13 @@ func TestRunHookClaudeAutoVerifyVerifiesWhenArtifactMissing(t *testing.T) {
       - pass: "bash script.sh"
 permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -1190,9 +1314,13 @@ func TestRunHookClaudeStructuredAllowFailsClosedOnCompoundCommand(t *testing.T) 
 	home := t.TempDir()
 	writeUserConfig(t, home, `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -1231,9 +1359,13 @@ func TestRunHookClaudeBashPrefixAllowDoesNotAuthorizeCompoundRightSide(t *testin
 	payload := runClaudeHookTest(t, hookEnvSpec{
 		UserConfig: `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
@@ -1262,25 +1394,37 @@ func TestRunHookAllowsCompoundWhenEveryCommandIsIndividuallyAllowed(t *testing.T
 	payload := runClaudeHookTest(t, hookEnvSpec{
 		UserConfig: `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
         pass:
           - "git diff"
-    - match:
-        command: git
-        subcommand: diff
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: diff
       test:
         allow:
           - "git diff"
         pass:
           - "git status"
-    - match:
-        command: git
-        subcommand: log
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: log
       test:
         allow:
           - "git log"
@@ -1308,17 +1452,22 @@ func TestRunHookDeniesCompoundWhenAnyCommandIsDenied(t *testing.T) {
 	payload := runClaudeHookTest(t, hookEnvSpec{
 		UserConfig: `permission:
   deny:
-    - match:
-        command: rm
+    - command:
+
+        name: rm
       test:
         deny:
           - "rm -rf /tmp/x"
         pass:
           - "git status"
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"

@@ -49,7 +49,7 @@ The current `cc-bash-proxy` contract prioritizes:
 |---|---|---|
 | `core/COMPATIBILITY.md` | implemented | versioning and compatibility stance |
 | `core/CONFIG.md` | implemented | config locations, merge order, and invalid-state handling |
-| `core/EVALUATION.md` | implemented | rewrite phase, permission phase, compound command evaluation, raw allow, and fail-closed behavior |
+| `core/EVALUATION.md` | implemented | rewrite phase, permission phase, compound command evaluation, patterns allow, and fail-closed behavior |
 | `core/INPUT_MODEL.md` | implemented | supported stdin payloads and normalized invocation model |
 | `core/PARSER_MODEL.md` | implemented | command parser layers and match stability rules |
 | `core/RULE_SCHEMA.md` | implemented | YAML schema for `rewrite`, `permission`, and `test` |

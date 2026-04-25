@@ -35,11 +35,8 @@ rewrite:
 
 permission:
   deny:
-    - match:
-        env_requires:
-          - "AWS_PROFILE"
-        args_contains:
-          - "--delete"
+    - patterns:
+        - '^\s*AWS_PROFILE=prod\s+aws\s+s3\s+rm\b'
       message: "delete is blocked"
       test:
         deny:
@@ -48,9 +45,10 @@ permission:
           - "AWS_PROFILE=prod aws sts get-caller-identity"
 
   ask:
-    - match:
-        command: aws
-        subcommand: s3
+    - command:
+        name: aws
+        semantic:
+          service: s3
       message: "s3 operations require confirmation"
       test:
         ask:
@@ -59,10 +57,12 @@ permission:
           - "AWS_PROFILE=prod aws sts get-caller-identity"
 
   allow:
-    - match:
-        command: aws
-        subcommand: sts
-        env_requires:
+    - command:
+        name: aws
+        semantic:
+          service: sts
+      env:
+        requires:
           - "AWS_PROFILE"
       test:
         allow:
@@ -181,30 +181,37 @@ Each bucket contains an array of permission rules.
 
 Each permission rule may contain:
 
-- required selector: exactly one of `match`, `pattern`, or `patterns`
+- optional `name`
+- required predicate: one or more of `command`, `env`, or `patterns`
 - optional `message`
-- optional `allow_unsafe_shell` for raw `allow` rules that intentionally allow
-  a supported full shell expression after it passes the fail-closed evaluation
-  safety gate; when true, `message` is required
 - required `test`
+
+`pattern` does not exist, and permission `match` does not exist. Rewrite
+`match` is separate and unchanged.
+Permission `command` does not support `command_in`; when a raw fallback must
+cover multiple commands, express it as multiple `patterns` entries.
 
 ### Permission rule example
 
 ```yaml
 allow:
-  - match:
-      command: aws
-      subcommand: sts
-      env_requires:
+  - name: aws identity
+    command:
+      name: aws
+      semantic:
+        service: sts
+        operation: get-caller-identity
+    env:
+      requires:
         - "AWS_PROFILE"
     test:
-      expect:
+      allow:
         - "AWS_PROFILE=prod aws sts get-caller-identity"
       pass:
         - "AWS_PROFILE=prod aws s3 ls"
 ```
 
-Regular-expression selectors are also allowed:
+Regular-expression predicates use `patterns`:
 
 ```yaml
 deny:
@@ -219,12 +226,18 @@ deny:
         - "git diff HEAD~1"
 ```
 
+Valid predicate combinations are `command`, `command + env`, `command +
+command.semantic`, `command + command.semantic + env`, `patterns`, `patterns +
+env`, and `env` only. `command + patterns` is invalid. `env.requires` and
+`env.missing` are the only supported env fields, and empty entries are
+validation errors. Env-only `allow` is valid but broad, so diagnostics report a
+warning.
+
 ### Permission semantic match
 
-Structured permission `match` may include `semantic` only when `match.command`
-is an exact command discriminator. `command_in` plus `semantic` is invalid
-because the semantic schema would be ambiguous. `semantic` is an internal member
-of `match`; it cannot be combined with top-level `pattern` or `patterns`.
+Permission `command` may include `semantic` only when `command.name`
+is an exact command discriminator. `semantic` is an internal member of
+`command`; `command` cannot be combined with `patterns`.
 Do not nest another command key under `semantic`: `semantic.service` is valid
 for AWS rules and `semantic.verb` is valid for kubectl rules, while
 `semantic.aws.service`, `semantic.kubectl.verb`, `semantic.gh.area`, or
@@ -256,8 +269,8 @@ Example:
 
 ```yaml
 deny:
-  - match:
-      command: git
+  - command:
+      name: git
       semantic:
         verb: clean
         force: true
@@ -269,7 +282,7 @@ deny:
 Git semantic parsing is best-effort static parsing of the command argv. It
 does not query repository state; ambiguous operands are left conservative or
 classified by common CLI convention. `GenericParser` never satisfies
-`match.semantic`, so a command-specific parser must provide semantic data.
+`command.semantic`, so a command-specific parser must provide semantic data.
 For `git push`, `force: true` includes `--force`, `-f`,
 `--force-with-lease`, and `--force-if-includes`. For `git clean`,
 `force: true` includes `-f` and `--force`.
@@ -287,8 +300,8 @@ Example:
 
 ```yaml
 deny:
-  - match:
-      command: aws
+  - command:
+      name: aws
       semantic:
         service: s3
         operation_in:
@@ -322,8 +335,8 @@ Example:
 
 ```yaml
 deny:
-  - match:
-      command: kubectl
+  - command:
+      name: kubectl
       semantic:
         verb: delete
         resource_type_in:
@@ -374,8 +387,8 @@ Example:
 ```yaml
 permission:
   deny:
-    - match:
-        command: gh
+    - command:
+        name: gh
         semantic:
           area: api
           method_in:
@@ -387,8 +400,8 @@ permission:
       message: "GitHub API mutation requires explicit policy"
 
   ask:
-    - match:
-        command: gh
+    - command:
+        name: gh
         semantic:
           area: pr
           verb_in:
@@ -402,8 +415,8 @@ permission:
       message: "PR mutation requires confirmation"
 
   allow:
-    - match:
-        command: gh
+    - command:
+        name: gh
         semantic:
           area: run
           verb_in:
@@ -456,8 +469,8 @@ Example:
 ```yaml
 permission:
   deny:
-    - match:
-        command: helmfile
+    - command:
+        name: helmfile
         semantic:
           verb_in:
             - sync
@@ -471,16 +484,16 @@ permission:
       message: "non-interactive helmfile mutation in production is blocked"
 
   ask:
-    - match:
-        command: helmfile
+    - command:
+        name: helmfile
         semantic:
           verb: sync
           selector_missing: true
       message: "helmfile sync without selector requires confirmation"
 
   allow:
-    - match:
-        command: helmfile
+    - command:
+        name: helmfile
         semantic:
           verb_in:
             - diff
@@ -517,9 +530,9 @@ read-only or dry-run-oriented verbs, but static parsing cannot prove that
 hooks or plugins are side-effect free.
 
 Unsupported semantic fields, unsupported value types, `semantic` without exact
-`command`, `command_in` with `semantic`, `subcommand` with `semantic`, command
-and semantic schema mismatches, and rewrite selectors with `semantic` are
-validation errors. Generic parser fallback never satisfies semantic match.
+`command.name`, command and semantic schema mismatches, and rewrite selectors
+with `semantic` are validation errors. Generic parser fallback never satisfies
+semantic match.
 Unsupported semantic field errors must include the supported fields for the
 selected command.
 
@@ -528,12 +541,10 @@ words after the executable token. `semantic.flags_contains` and
 `semantic.flags_prefixes` inspect options recognized by the command-specific
 semantic parser and do not match on GenericParser fallback.
 
-For `permission.allow`, `pattern` and `patterns` fail closed to `ask` unless
-the command is safe for evaluation. Syntax parse errors, diagnostics, unknown
-shapes, redirects, subshells, background execution, process substitution, and
-unsafe AST forms never reach allow matching. Set `allow_unsafe_shell: true`
-only for intentionally trusted full-command raw matches that still pass that
-safety gate, and include a `message` explaining that trust boundary.
+For `permission.allow`, `patterns` fails closed to `ask` unless the command is
+safe for evaluation. Syntax parse errors, diagnostics, unknown shapes,
+redirects, subshells, background execution, process substitution, and unsafe AST
+forms never reach allow matching.
 
 Compound commands are evaluated through `CommandPlan.Commands` plus
 `CommandPlan.Shape`, not by matching the raw command string across shell

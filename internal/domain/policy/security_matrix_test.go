@@ -13,7 +13,7 @@ type securityTraceWant struct {
 
 func TestSecurityRegressionMatrixEvaluationBoundaries(t *testing.T) {
 	gitRule := func(subcommand string) PermissionRuleSpec {
-		return PermissionRuleSpec{Match: MatchSpec{Command: "git", Subcommand: subcommand}}
+		return PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: subcommand}}}
 	}
 	allowGitReadOnly := []PermissionRuleSpec{gitRule("status"), gitRule("diff"), gitRule("log")}
 
@@ -91,7 +91,7 @@ func TestSecurityRegressionMatrixEvaluationBoundaries(t *testing.T) {
 			name:       "command substitution is never auto allowed",
 			category:   "shell_features",
 			command:    "echo $(git status)",
-			permission: PermissionSpec{Allow: append([]PermissionRuleSpec{{Match: MatchSpec{Command: "echo"}}}, allowGitReadOnly...)},
+			permission: PermissionSpec{Allow: append([]PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "echo"}}}, allowGitReadOnly...)},
 			want:       "ask",
 			shape:      commandpkg.ShellShapeCompound,
 			flags:      []string{"command_substitution"},
@@ -101,7 +101,7 @@ func TestSecurityRegressionMatrixEvaluationBoundaries(t *testing.T) {
 			name:       "process substitution extracts deny but cannot allow",
 			category:   "shell_features",
 			command:    "cat <(rm -rf /tmp/x)",
-			permission: PermissionSpec{Deny: []PermissionRuleSpec{{Match: MatchSpec{Command: "rm", ArgsContains: []string{"-rf"}}}}},
+			permission: PermissionSpec{Deny: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "rm"}}}},
 			want:       "deny",
 			shape:      commandpkg.ShellShapeCompound,
 			flags:      []string{"process_substitution"},
@@ -118,38 +118,38 @@ func TestSecurityRegressionMatrixEvaluationBoundaries(t *testing.T) {
 			trace:      []securityTraceWant{{name: "fail_closed", effect: "ask"}, {name: "composition", effect: "ask"}},
 		},
 		{
-			name:       "raw deny cannot be upgraded by allow",
+			name:       "patterns deny cannot be upgraded by allow",
 			category:   "permission",
 			command:    "git status",
-			permission: PermissionSpec{Deny: []PermissionRuleSpec{{Pattern: `^\s*git\s+status\s*$`}}, Allow: []PermissionRuleSpec{gitRule("status")}},
+			permission: PermissionSpec{Deny: []PermissionRuleSpec{{Patterns: []string{`^\s*git\s+status\s*$`}}}, Allow: []PermissionRuleSpec{gitRule("status")}},
 			want:       "deny",
 			shape:      commandpkg.ShellShapeSimple,
 			trace:      []securityTraceWant{{effect: "deny"}},
 		},
 		{
-			name:       "raw ask cannot be upgraded by allow",
+			name:       "patterns ask cannot be upgraded by allow",
 			category:   "permission",
 			command:    "git status",
-			permission: PermissionSpec{Ask: []PermissionRuleSpec{{Pattern: `^\s*git\s+status\s*$`}}, Allow: []PermissionRuleSpec{gitRule("status")}},
+			permission: PermissionSpec{Ask: []PermissionRuleSpec{{Patterns: []string{`^\s*git\s+status\s*$`}}}, Allow: []PermissionRuleSpec{gitRule("status")}},
 			want:       "ask",
 			shape:      commandpkg.ShellShapeSimple,
 			trace:      []securityTraceWant{{effect: "ask"}},
 		},
 		{
-			name:       "raw allow does not broaden without unsafe opt in",
+			name:       "patterns allow does not broaden across compound commands",
 			category:   "permission",
 			command:    "git status && rm -rf /tmp/x",
-			permission: PermissionSpec{Allow: []PermissionRuleSpec{{Pattern: `^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`}}},
+			permission: PermissionSpec{Allow: []PermissionRuleSpec{{Patterns: []string{`^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`}}}},
 			want:       "ask",
 			shape:      commandpkg.ShellShapeCompound,
 			flags:      []string{"conditional"},
 			trace:      []securityTraceWant{{name: "composition", effect: "ask"}},
 		},
 		{
-			name:       "structured deny beats unsafe raw allow",
+			name:       "command deny beats broad patterns allow",
 			category:   "permission",
 			command:    "git status && rm -rf /tmp/x",
-			permission: PermissionSpec{Deny: []PermissionRuleSpec{{Match: MatchSpec{Command: "rm"}}}, Allow: []PermissionRuleSpec{{Pattern: `.*`, AllowUnsafeShell: true, Message: "broad raw allow"}}},
+			permission: PermissionSpec{Deny: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "rm"}}}, Allow: []PermissionRuleSpec{{Patterns: []string{`.*`}, Message: "broad patterns allow"}}},
 			want:       "deny",
 			shape:      commandpkg.ShellShapeCompound,
 			flags:      []string{"conditional"},
@@ -184,7 +184,7 @@ func TestSecurityRegressionMatrixParserBoundaries(t *testing.T) {
 			name:           "git semantic parser preserves deny",
 			command:        "git status",
 			registry:       commandpkg.DefaultParserRegistry(),
-			permission:     PermissionSpec{Deny: []PermissionRuleSpec{{Match: MatchSpec{Command: "git", Subcommand: "status"}}}, Allow: []PermissionRuleSpec{{Match: MatchSpec{Command: "git"}}}},
+			permission:     PermissionSpec{Deny: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}}}, Allow: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git"}}}},
 			want:           "deny",
 			wantParser:     "git",
 			wantSemantic:   "git",
@@ -194,7 +194,7 @@ func TestSecurityRegressionMatrixParserBoundaries(t *testing.T) {
 			name:         "generic fallback asks instead of widening to command allow",
 			command:      "git -C repo status",
 			registry:     commandpkg.NewCommandParserRegistry(),
-			permission:   PermissionSpec{Deny: []PermissionRuleSpec{{Match: MatchSpec{Command: "git", Subcommand: "status"}}}, Allow: []PermissionRuleSpec{{Match: MatchSpec{Command: "git"}}}},
+			permission:   PermissionSpec{Deny: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}}}, Allow: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git"}}}},
 			want:         "ask",
 			wantParser:   "generic",
 			wantSemantic: "",
@@ -203,7 +203,7 @@ func TestSecurityRegressionMatrixParserBoundaries(t *testing.T) {
 			name:         "unknown command asks by default",
 			command:      "unknown-tool status",
 			registry:     commandpkg.DefaultParserRegistry(),
-			permission:   PermissionSpec{Allow: []PermissionRuleSpec{{Match: MatchSpec{Command: "git"}}}},
+			permission:   PermissionSpec{Allow: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git"}}}},
 			want:         "ask",
 			wantParser:   "generic",
 			wantSemantic: "",
@@ -255,7 +255,7 @@ func TestSecurityRegressionMatrixRewriteBoundaries(t *testing.T) {
 			command: "bash -c 'git status'",
 			rewrite: []RewriteStepSpec{{UnwrapShellDashC: true}},
 			permission: PermissionSpec{Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Subcommand: "status"},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}},
 			}}},
 			want:    "allow",
 			wantCmd: "git status",
@@ -267,9 +267,10 @@ func TestSecurityRegressionMatrixRewriteBoundaries(t *testing.T) {
 			command: "aws --profile dev sts get-caller-identity",
 			rewrite: []RewriteStepSpec{{MoveFlagToEnv: MoveFlagToEnvSpec{Flag: "--profile", Env: "AWS_PROFILE"}}},
 			permission: PermissionSpec{
-				Deny: []PermissionRuleSpec{{Pattern: `^\s*aws\s+--profile\s+dev\s+`}},
+				Deny: []PermissionRuleSpec{{Patterns: []string{`^\s*aws\s+--profile\s+dev\s+`}}},
 				Allow: []PermissionRuleSpec{{
-					Match: MatchSpec{Command: "aws", Subcommand: "sts", EnvRequires: []string{"AWS_PROFILE"}},
+					Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "sts"}},
+					Env:     PermissionEnvSpec{Requires: []string{"AWS_PROFILE"}},
 				}},
 			},
 			want:    "allow",
@@ -285,7 +286,8 @@ func TestSecurityRegressionMatrixRewriteBoundaries(t *testing.T) {
 				{MoveFlagToEnv: MoveFlagToEnvSpec{Flag: "--profile", Env: "AWS_PROFILE"}},
 			},
 			permission: PermissionSpec{Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", Subcommand: "sts", EnvRequires: []string{"AWS_PROFILE"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "sts"}},
+				Env:     PermissionEnvSpec{Requires: []string{"AWS_PROFILE"}},
 			}}},
 			want:    "allow",
 			wantCmd: "AWS_PROFILE=dev aws sts get-caller-identity",
@@ -297,7 +299,7 @@ func TestSecurityRegressionMatrixRewriteBoundaries(t *testing.T) {
 			command: "bash -c 'git status && rm -rf /tmp/x'",
 			rewrite: []RewriteStepSpec{{UnwrapShellDashC: true}},
 			permission: PermissionSpec{Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Subcommand: "status"},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}},
 			}}},
 			want:    "ask",
 			wantCmd: "bash -c 'git status && rm -rf /tmp/x'",

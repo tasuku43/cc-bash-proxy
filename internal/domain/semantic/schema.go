@@ -48,8 +48,8 @@ var schemas = []Schema{
 		Examples: []Example{
 			{Title: "Deny force pushes", YAML: `permission:
   deny:
-    - match:
-        command: git
+    - command:
+        name: git
         semantic:
           verb: push
           force: true`},
@@ -82,8 +82,8 @@ var schemas = []Schema{
 		Examples: []Example{
 			{Title: "Ask for IAM writes", YAML: `permission:
   ask:
-    - match:
-        command: aws
+    - command:
+        name: aws
         semantic:
           service: iam`},
 		},
@@ -125,8 +125,8 @@ var schemas = []Schema{
 		Examples: []Example{
 			{Title: "Deny production deletes", YAML: `permission:
   deny:
-    - match:
-        command: kubectl
+    - command:
+        name: kubectl
         semantic:
           verb: delete
           namespace: prod`},
@@ -180,8 +180,8 @@ var schemas = []Schema{
 		Examples: []Example{
 			{Title: "Deny mutating GitHub API calls", YAML: `permission:
   deny:
-    - match:
-        command: gh
+    - command:
+        name: gh
         semantic:
           area: api
           method_in: [POST, PATCH, PUT, DELETE]`},
@@ -233,8 +233,8 @@ var schemas = []Schema{
 		Examples: []Example{
 			{Title: "Ask before production destroy", YAML: `permission:
   ask:
-    - match:
-        command: helmfile
+    - command:
+        name: helmfile
         semantic:
           verb: destroy
           environment: prod`},

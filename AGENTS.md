@@ -44,7 +44,10 @@ appropriate.
 
 For permission proxy behavior, ambiguity must not become permissive.
 
-- raw `allow` must not become broader without explicit docs and tests
+- permission rules use only `command`, `env`, and `patterns`; permission
+  `match` and `pattern` do not exist
+- raw regex matching is always `patterns`
+- `command` and `patterns` must not be combined in a permission rule
 - compound command handling must not accidentally allow additional shell
   segments
 - unknown shell shapes must not be made more permissive accidentally

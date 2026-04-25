@@ -215,10 +215,13 @@ Rewrite step example:
 Permission rule example:
   permission:
     allow:
-      - match:
-          command: aws
-          subcommand: sts
-          env_requires:
+      - command:
+          name: aws
+          semantic:
+            service: sts
+            operation: get-caller-identity
+        env:
+          requires:
             - "AWS_PROFILE"
         test:
           allow:
@@ -232,7 +235,7 @@ E2E test example:
       rewritten: "AWS_PROFILE=read-only-profile aws sts get-caller-identity"
       decision: allow
 
-For matcher fields, run:
+For permission predicate fields, run:
   cc-bash-proxy help match
 
 For semantic command schemas, run:
@@ -245,6 +248,16 @@ For rewrite primitives, run:
 		fmt.Fprint(w, `cc-bash-proxy help match
 
 Supported match fields:
+Permission rules do not use match or pattern. Permission rules use:
+  - command: command name plus command-specific semantic matcher
+  - env: execution environment matcher with requires and missing
+  - patterns: raw command string regex list
+Permission command does not support command_in; use multiple patterns for
+multi-command raw fallbacks.
+
+rewrite.match is separate and unchanged.
+
+Rewrite match fields:
   - command: exact executable name
   - command_in: executable must be one of these names
   - command_is_absolute_path: executable token must be an absolute path
@@ -253,29 +266,24 @@ Supported match fields:
   - args_prefixes: legacy raw-word tokens that must start with these prefixes
   - env_requires: env vars that must be present
   - env_missing: env vars that must be absent
-  - semantic: command-specific structured matcher selected by match.command
+  - semantic: unsupported for rewrite.match
 
 args_contains and args_prefixes inspect command words after the executable
 token, before command-specific semantic argument parsing.
 
-semantic:
-  match.semantic is command-specific. The schema is selected by exact
-  match.command. Do not write semantic.git or semantic.gh.
+permission command.semantic:
+  command.semantic is command-specific. The schema is selected by exact
+  command.name. Do not write semantic.git or semantic.gh.
 
-  semantic can be used only inside permission rule match blocks.
-  rewrite.match.semantic is unsupported. GenericParser fallback never satisfies
-  semantic match. command_in + semantic is invalid. subcommand + semantic is
-  invalid because semantic fields are more precise.
+  GenericParser fallback never satisfies semantic match.
 
   semantic.flags_contains and semantic.flags_prefixes inspect tokens recognized
   as options/flags by the command-specific parser. They do not run when a
   semantic parser is unavailable.
 
-Selector kinds:
-  Each permission rule or rewrite step uses exactly one selector kind:
-  - match
-  - pattern
-  - patterns
+Permission predicate combinations:
+  command, command + env, command + semantic, command + semantic + env,
+  patterns, patterns + env, and env only. command + patterns is invalid.
 
 Discover semantic schemas:
   cc-bash-proxy help semantic
@@ -283,16 +291,19 @@ Discover semantic schemas:
   cc-bash-proxy semantic-schema --format json
 
 Example:
-  match:
-    command: aws
-    args_prefixes:
-      - "--profile"
+  command:
+    name: aws
+    semantic:
+      service: sts
+  env:
+    requires:
+      - AWS_PROFILE
 
-Pattern is still supported when shell-shape matching is easier than argv
-matching.
+patterns is the raw regex escape hatch for permission rules.
 
 Example:
-  pattern: '^\s*cd\s+[^&;|]+\s*(&&|;|\|)'
+  patterns:
+    - '^\s*helm\s+upgrade\b'
 `)
 	case "rewrite":
 		fmt.Fprint(w, `cc-bash-proxy help rewrite
@@ -336,7 +347,7 @@ func writeSemanticHelp(w io.Writer, args []string) error {
 	if len(args) == 0 {
 		fmt.Fprint(w, `Semantic match schemas
 
-match.semantic is command-specific. The schema is selected by match.command.
+command.semantic is command-specific. The schema is selected by command.name.
 Do not nest another command key under semantic.
 
 Supported commands:
@@ -353,15 +364,14 @@ Usage:
 Example:
   permission:
     deny:
-      - match:
-          command: git
+      - command:
+          name: git
           semantic:
             verb: push
             force: true
 
 Notes:
-  args_contains / args_prefixes are legacy raw-word matchers after the executable
-  token. semantic.flags_contains / semantic.flags_prefixes inspect options
+  semantic.flags_contains / semantic.flags_prefixes inspect options
   recognized by the command-specific parser and never match on GenericParser
   fallback.
 `)
@@ -390,9 +400,7 @@ Notes:
 		fmt.Fprint(w, "\nBoolean field definitions are included in the field descriptions above.\n")
 	}
 	fmt.Fprint(w, "\nValidation rules:\n")
-	fmt.Fprint(w, "  - semantic requires exact match.command.\n")
-	fmt.Fprint(w, "  - command_in + semantic is invalid.\n")
-	fmt.Fprint(w, "  - subcommand + semantic is invalid.\n")
+	fmt.Fprint(w, "  - permission command.semantic requires exact command.name.\n")
 	fmt.Fprint(w, "  - rewrite.match.semantic is unsupported.\n")
 	fmt.Fprint(w, "  - unsupported fields and unsupported value types fail verify.\n")
 	fmt.Fprint(w, "  - GenericParser fallback never satisfies semantic match.\n")

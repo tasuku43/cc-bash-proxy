@@ -42,13 +42,23 @@ type PermissionSpec struct {
 }
 
 type PermissionRuleSpec struct {
-	Match            MatchSpec          `yaml:"match" json:"match,omitempty"`
-	Pattern          string             `yaml:"pattern" json:"pattern,omitempty"`
-	Patterns         []string           `yaml:"patterns" json:"patterns,omitempty"`
-	AllowUnsafeShell bool               `yaml:"allow_unsafe_shell" json:"allow_unsafe_shell,omitempty"`
-	Message          string             `yaml:"message" json:"message,omitempty"`
-	Test             PermissionTestSpec `yaml:"test" json:"test,omitempty"`
-	Source           Source             `yaml:"-" json:"source,omitempty"`
+	Name     string                `yaml:"name" json:"name,omitempty"`
+	Command  PermissionCommandSpec `yaml:"command" json:"command,omitempty"`
+	Env      PermissionEnvSpec     `yaml:"env" json:"env,omitempty"`
+	Patterns []string              `yaml:"patterns" json:"patterns,omitempty"`
+	Message  string                `yaml:"message" json:"message,omitempty"`
+	Test     PermissionTestSpec    `yaml:"test" json:"test,omitempty"`
+	Source   Source                `yaml:"-" json:"source,omitempty"`
+}
+
+type PermissionCommandSpec struct {
+	Name     string             `yaml:"name" json:"name,omitempty"`
+	Semantic *SemanticMatchSpec `yaml:"semantic" json:"semantic,omitempty"`
+}
+
+type PermissionEnvSpec struct {
+	Requires []string `yaml:"requires" json:"requires,omitempty"`
+	Missing  []string `yaml:"missing" json:"missing,omitempty"`
 }
 
 type PermissionTestSpec struct {
@@ -313,13 +323,20 @@ type preparedRewriteStep struct {
 
 type preparedPermissionRule struct {
 	Spec     PermissionRuleSpec
-	Selector preparedSelector
+	Selector preparedPermissionSelector
 }
 
 type preparedSelector struct {
 	Match       MatchSpec
 	HasPattern  bool
 	Pattern     *regexp.Regexp
+	HasPatterns bool
+	Patterns    []*regexp.Regexp
+}
+
+type preparedPermissionSelector struct {
+	Command     PermissionCommandSpec
+	Env         PermissionEnvSpec
 	HasPatterns bool
 	Patterns    []*regexp.Regexp
 }
@@ -373,10 +390,30 @@ func preparePermissionRules(rules []PermissionRuleSpec) []preparedPermissionRule
 	for _, rule := range rules {
 		prepared = append(prepared, preparedPermissionRule{
 			Spec:     rule,
-			Selector: prepareSelector(rule.Match, rule.Pattern, rule.Patterns),
+			Selector: preparePermissionSelector(rule),
 		})
 	}
 	return prepared
+}
+
+func preparePermissionSelector(rule PermissionRuleSpec) preparedPermissionSelector {
+	selector := preparedPermissionSelector{
+		Command: rule.Command,
+		Env:     rule.Env,
+	}
+	if len(rule.Patterns) > 0 {
+		selector.HasPatterns = true
+		selector.Patterns = make([]*regexp.Regexp, 0, len(rule.Patterns))
+		for _, p := range rule.Patterns {
+			re, err := regexp.Compile(p)
+			if err != nil {
+				selector.Patterns = append(selector.Patterns, nil)
+				continue
+			}
+			selector.Patterns = append(selector.Patterns, re)
+		}
+	}
+	return selector
 }
 
 func prepareSelector(match MatchSpec, pattern string, patterns []string) preparedSelector {
@@ -470,7 +507,7 @@ func Evaluate(p Pipeline, command string) (Decision, error) {
 		trace = append(trace, unsafeCommandTraceStep(plan, safety))
 	}
 
-	if rule, ok := firstPreparedRawPermissionMatch(prepared.Deny, current); ok {
+	if rule, ok := firstPreparedPatternPermissionMatch(prepared.Deny, current); ok {
 		trace = append(trace, permissionTraceStep("deny", permissionRuleTypeRaw, rule))
 		return Decision{Outcome: "deny", Explicit: true, Reason: "rule_match", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
 	}
@@ -484,7 +521,7 @@ func Evaluate(p Pipeline, command string) (Decision, error) {
 			return Decision{Outcome: decision.Outcome, Explicit: true, Reason: "composition", Command: current, OriginalCommand: command, Message: decision.Message, Trace: trace}, nil
 		}
 	}
-	if rule, ok := firstPreparedRawPermissionMatch(prepared.Ask, current); ok {
+	if rule, ok := firstPreparedPatternPermissionMatch(prepared.Ask, current); ok {
 		trace = append(trace, permissionTraceStep("ask", permissionRuleTypeRaw, rule))
 		return Decision{Outcome: "ask", Explicit: true, Reason: "rule_match", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
 	}
@@ -508,7 +545,7 @@ func Evaluate(p Pipeline, command string) (Decision, error) {
 		trace = append(trace, decision.Trace...)
 		return Decision{Outcome: decision.Outcome, Explicit: true, Reason: "composition", Command: current, OriginalCommand: command, Message: decision.Message, Trace: trace}, nil
 	}
-	if rule, ok := firstPreparedRawAllowPermissionMatch(prepared.Allow, current); ok {
+	if rule, ok := firstPreparedPatternAllowPermissionMatch(prepared.Allow, current); ok {
 		trace = append(trace, permissionTraceStep("allow", permissionRuleTypeRaw, rule))
 		return Decision{Outcome: "allow", Explicit: true, Reason: "rule_match", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
 	}
@@ -572,11 +609,18 @@ func unsafeCommandTraceStep(plan commandpkg.CommandPlan, safety commandpkg.Evalu
 }
 
 func permissionTraceStep(effect string, ruleType string, rule PermissionRuleSpec) TraceStep {
+	predicate := permissionPredicateSummary(rule)
+	name := strings.TrimSpace(rule.Name)
+	if name == "" {
+		name = predicate
+	}
 	return TraceStep{
 		Action:   "permission",
+		Name:     name,
 		Effect:   effect,
 		RuleType: ruleType,
 		Message:  rule.Message,
+		Reason:   predicate,
 		Source:   sourcePtr(rule.Source),
 	}
 }
@@ -616,16 +660,16 @@ func permissionTraceStepForCommand(effect string, ruleType string, rule Permissi
 		step.HelmfileSelectors = append([]string(nil), cmd.Helmfile.Selectors...)
 		step.HelmfileInteractive = boolPtr(cmd.Helmfile.Interactive)
 	}
-	if rule.Match.Semantic != nil {
+	if rule.Command.Semantic != nil {
 		step.SemanticMatch = true
-		step.SemanticFields = rule.Match.Semantic.fieldsUsed()
+		step.SemanticFields = rule.Command.Semantic.fieldsUsed()
 	}
 	return step
 }
 
-func firstPreparedRawPermissionMatch(rules []preparedPermissionRule, command string) (PermissionRuleSpec, bool) {
+func firstPreparedPatternPermissionMatch(rules []preparedPermissionRule, command string) (PermissionRuleSpec, bool) {
 	for _, rule := range rules {
-		if rule.Selector.matchesRaw(command) {
+		if rule.Selector.matchesPatterns(command) {
 			return rule.Spec, true
 		}
 	}
@@ -634,7 +678,7 @@ func firstPreparedRawPermissionMatch(rules []preparedPermissionRule, command str
 
 func firstPreparedStructuredPermissionMatch(rules []preparedPermissionRule, command string) (PermissionRuleSpec, commandpkg.Command, bool) {
 	for _, rule := range rules {
-		if cmd, ok := rule.Selector.matchesStructured(command); ok {
+		if cmd, ok := rule.Selector.matchesCommand(command); ok {
 			return rule.Spec, cmd, true
 		}
 	}
@@ -646,22 +690,19 @@ func firstPreparedStructuredAllowPermissionMatch(rules []preparedPermissionRule,
 		if !allowRuleCanMatch(rule.Spec, command) {
 			continue
 		}
-		if cmd, ok := rule.Selector.matchesStructured(command); ok {
+		if cmd, ok := rule.Selector.matchesCommand(command); ok {
 			return rule.Spec, cmd, true
 		}
 	}
 	return PermissionRuleSpec{}, commandpkg.Command{}, false
 }
 
-func firstPreparedRawAllowPermissionMatch(rules []preparedPermissionRule, command string) (PermissionRuleSpec, bool) {
+func firstPreparedPatternAllowPermissionMatch(rules []preparedPermissionRule, command string) (PermissionRuleSpec, bool) {
 	for _, rule := range rules {
-		if !rule.Spec.AllowUnsafeShell {
-			continue
-		}
 		if !allowRuleCanMatch(rule.Spec, command) {
 			continue
 		}
-		if rule.Selector.matchesRaw(command) {
+		if rule.Selector.matchesPatterns(command) {
 			return rule.Spec, true
 		}
 	}
@@ -1048,7 +1089,7 @@ func helmfileTraceInteractive(cmd commandpkg.Command) *bool {
 
 func firstPreparedCommandMatch(rules []preparedPermissionRule, cmd commandpkg.Command) (PermissionRuleSpec, bool) {
 	for _, rule := range rules {
-		if rule.Selector.matchesStructuredCommand(cmd) {
+		if rule.Selector.matchesCommandValue(cmd) {
 			return rule.Spec, true
 		}
 	}
@@ -1057,10 +1098,7 @@ func firstPreparedCommandMatch(rules []preparedPermissionRule, cmd commandpkg.Co
 
 func firstPreparedCommandAllowMatch(rules []preparedPermissionRule, cmd commandpkg.Command) (PermissionRuleSpec, bool) {
 	for _, rule := range rules {
-		if rule.Spec.AllowUnsafeShell {
-			continue
-		}
-		if rule.Selector.matchesStructuredCommand(cmd) {
+		if rule.Selector.matchesCommandValue(cmd) {
 			return rule.Spec, true
 		}
 	}
@@ -1072,10 +1110,10 @@ func hasUnresolvedSemanticGuard(rules []preparedPermissionRule, cmd commandpkg.C
 		return false
 	}
 	for _, rule := range rules {
-		if !rule.Selector.hasStructuredSelector() {
+		if !rule.Selector.hasCommandSelector() {
 			continue
 		}
-		if matchRequiresSemantic(rule.Selector.Match) && matchStructuralScopeMatches(rule.Selector.Match, cmd) {
+		if rule.Selector.Command.Semantic != nil && permissionCommandStructuralScopeMatches(rule.Selector.Command, rule.Selector.Env, cmd) {
 			return true
 		}
 	}
@@ -1109,13 +1147,71 @@ func matchStructuralScopeMatches(match MatchSpec, cmd commandpkg.Command) bool {
 	return true
 }
 
+func permissionCommandStructuralScopeMatches(command PermissionCommandSpec, env PermissionEnvSpec, cmd commandpkg.Command) bool {
+	if cmd.Program == "" {
+		return false
+	}
+	if strings.TrimSpace(command.Name) == "" || cmd.Program != strings.TrimSpace(command.Name) {
+		return false
+	}
+	return permissionEnvMatches(env, cmd)
+}
+
+func permissionEnvMatches(env PermissionEnvSpec, cmd commandpkg.Command) bool {
+	for _, name := range env.Requires {
+		if _, ok := cmd.Env[name]; !ok {
+			return false
+		}
+	}
+	for _, name := range env.Missing {
+		if _, ok := cmd.Env[name]; ok {
+			return false
+		}
+	}
+	return true
+}
+
+func permissionSemanticMatches(command string, semantic SemanticMatchSpec, cmd commandpkg.Command) bool {
+	switch strings.TrimSpace(command) {
+	case "git":
+		return semantic.matchesGit(cmd)
+	case "aws":
+		return semantic.matchesAWS(cmd)
+	case "kubectl":
+		return semantic.matchesKubectl(cmd)
+	case "gh":
+		return semantic.matchesGh(cmd)
+	case "helmfile":
+		return semantic.matchesHelmfile(cmd)
+	default:
+		return false
+	}
+}
+
+func permissionPredicateSummary(rule PermissionRuleSpec) string {
+	var groups []string
+	if strings.TrimSpace(rule.Command.Name) != "" {
+		groups = append(groups, "command")
+		if rule.Command.Semantic != nil {
+			groups = append(groups, "semantic")
+		}
+	}
+	if len(rule.Patterns) > 0 {
+		groups = append(groups, "patterns")
+	}
+	if !IsZeroPermissionEnvSpec(rule.Env) {
+		groups = append(groups, "env")
+	}
+	if len(groups) == 0 {
+		return "rule"
+	}
+	return strings.Join(groups, "+")
+}
+
 func allowRuleCanMatch(rule PermissionRuleSpec, command string) bool {
 	plan := commandpkg.Parse(command)
 	if !commandpkg.IsSafeForEvaluation(plan) {
 		return false
-	}
-	if rule.AllowUnsafeShell {
-		return true
 	}
 	return invocation.IsStructuredSafeForAllow(command)
 }
@@ -1160,16 +1256,21 @@ func RewriteStepMatches(step RewriteStepSpec, command string) bool {
 }
 
 func PermissionRuleMatches(rule PermissionRuleSpec, command string) bool {
-	return selectorMatches(command, rule.Match, rule.Pattern, rule.Patterns)
+	selector := preparePermissionSelector(rule)
+	if selector.hasCommandSelector() {
+		_, ok := selector.matchesCommand(command)
+		return ok
+	}
+	return selector.matchesPatterns(command)
 }
 
 func PermissionAllowRuleMatches(rule PermissionRuleSpec, command string) bool {
-	selector := prepareSelector(rule.Match, rule.Pattern, rule.Patterns)
-	if selector.hasStructuredSelector() {
-		_, ok := selector.matchesStructured(command)
+	selector := preparePermissionSelector(rule)
+	if selector.hasCommandSelector() {
+		_, ok := selector.matchesCommand(command)
 		return allowRuleCanMatch(rule, command) && ok
 	}
-	return allowRuleCanMatch(rule, command) && rule.AllowUnsafeShell && selector.matchesRaw(command)
+	return allowRuleCanMatch(rule, command) && selector.matchesPatterns(command)
 }
 
 func selectorMatches(command string, match MatchSpec, pattern string, patterns []string) bool {
@@ -1248,6 +1349,68 @@ func (s preparedSelector) matchesStructured(command string) (commandpkg.Command,
 
 func (s preparedSelector) matchesStructuredCommand(cmd commandpkg.Command) bool {
 	return s.hasStructuredSelector() && s.Match.matches(cmd)
+}
+
+func (s preparedPermissionSelector) hasCommandSelector() bool {
+	return strings.TrimSpace(s.Command.Name) != ""
+}
+
+func (s preparedPermissionSelector) matchesCommand(command string) (commandpkg.Command, bool) {
+	if !s.hasCommandSelector() {
+		return commandpkg.Command{}, false
+	}
+	plan := commandpkg.Parse(command)
+	if len(plan.Commands) != 1 {
+		return commandpkg.Command{}, false
+	}
+	cmd := plan.Commands[0]
+	return cmd, s.matchesCommandValue(cmd)
+}
+
+func (s preparedPermissionSelector) matchesCommandValue(cmd commandpkg.Command) bool {
+	if !s.hasCommandSelector() {
+		return false
+	}
+	if !permissionCommandStructuralScopeMatches(s.Command, s.Env, cmd) {
+		return false
+	}
+	if s.Command.Semantic != nil {
+		return permissionSemanticMatches(s.Command.Name, *s.Command.Semantic, cmd)
+	}
+	return true
+}
+
+func (s preparedPermissionSelector) matchesPatterns(command string) bool {
+	if !s.HasPatterns {
+		return s.matchesEnvOnly(command)
+	}
+	if !s.patternMatches(command) {
+		return false
+	}
+	if IsZeroPermissionEnvSpec(s.Env) {
+		return true
+	}
+	return s.matchesEnvOnly(command)
+}
+
+func (s preparedPermissionSelector) patternMatches(command string) bool {
+	for _, re := range s.Patterns {
+		if re != nil && re.MatchString(command) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s preparedPermissionSelector) matchesEnvOnly(command string) bool {
+	if IsZeroPermissionEnvSpec(s.Env) {
+		return false
+	}
+	plan := commandpkg.Parse(command)
+	if len(plan.Commands) != 1 {
+		return false
+	}
+	return permissionEnvMatches(s.Env, plan.Commands[0])
 }
 
 func patternMatches(command string, pattern string) bool {
@@ -2242,11 +2405,84 @@ func ValidateRewriteStep(prefix string, step RewriteStepSpec) []string {
 
 func ValidatePermissionRule(prefix string, rule PermissionRuleSpec, effect string) []string {
 	var issues []string
-	issues = append(issues, ValidateSelector(prefix, rule.Match, rule.Pattern, rule.Patterns, true, true)...)
-	if rule.AllowUnsafeShell && strings.TrimSpace(rule.Message) == "" {
-		issues = append(issues, prefix+".message must be non-empty when allow_unsafe_shell is true")
+	if strings.TrimSpace(rule.Name) == "" && rule.Name != "" {
+		issues = append(issues, prefix+".name must be non-empty")
 	}
+	issues = append(issues, ValidatePermissionPredicates(prefix, rule, effect)...)
 	issues = append(issues, ValidatePermissionTest(prefix+".test", rule.Test, effect)...)
+	return issues
+}
+
+func ValidatePermissionPredicates(prefix string, rule PermissionRuleSpec, effect string) []string {
+	var issues []string
+	count := 0
+	if !IsZeroPermissionCommandSpec(rule.Command) {
+		count++
+		issues = append(issues, ValidatePermissionCommandSpec(prefix+".command", rule.Command)...)
+	}
+	if len(rule.Patterns) > 0 {
+		count++
+		issues = append(issues, validateNonEmptyStrings(prefix+".patterns", rule.Patterns)...)
+		for i, p := range rule.Patterns {
+			if _, err := regexp.Compile(p); err != nil {
+				issues = append(issues, fmt.Sprintf("%s.patterns[%d] must compile: %s", prefix, i, err.Error()))
+			}
+		}
+	}
+	if !IsZeroPermissionEnvSpec(rule.Env) {
+		issues = append(issues, ValidatePermissionEnvSpec(prefix+".env", rule.Env)...)
+	}
+	if count == 0 && IsZeroPermissionEnvSpec(rule.Env) {
+		issues = append(issues, prefix+" must set one of command, env, or patterns")
+	}
+	if !IsZeroPermissionCommandSpec(rule.Command) && len(rule.Patterns) > 0 {
+		issues = append(issues, prefix+" cannot combine command and patterns")
+	}
+	return issues
+}
+
+func ValidatePermissionCommandSpec(prefix string, command PermissionCommandSpec) []string {
+	var issues []string
+	if strings.TrimSpace(command.Name) == "" {
+		issues = append(issues, prefix+".name must be non-empty")
+	}
+	if command.Semantic != nil {
+		if strings.TrimSpace(command.Name) == "" {
+			issues = append(issues, prefix+".name must be set when semantic is used")
+			return issues
+		}
+		name := strings.TrimSpace(command.Name)
+		if _, ok := semanticpkg.Lookup(name); !ok {
+			issues = append(issues, prefix+".semantic is only supported for "+strings.Join(supportedSemanticCommandLabels(), ", "))
+			return issues
+		}
+		unsupportedFields := unsupportedSemanticFields(name, *command.Semantic)
+		if len(unsupportedFields) > 0 {
+			issues = append(issues, prefix+".semantic contains fields not supported for command: "+name)
+			for _, field := range unsupportedFields {
+				issues = append(issues, unsupportedSemanticFieldIssue(prefix, name, field))
+			}
+		}
+		switch name {
+		case "git":
+			issues = append(issues, ValidateGitSemanticMatchSpec(prefix+".semantic", *command.Semantic)...)
+		case "aws":
+			issues = append(issues, ValidateAWSSemanticMatchSpec(prefix+".semantic", *command.Semantic)...)
+		case "kubectl":
+			issues = append(issues, ValidateKubectlSemanticMatchSpec(prefix+".semantic", *command.Semantic)...)
+		case "gh":
+			issues = append(issues, ValidateGhSemanticMatchSpec(prefix+".semantic", *command.Semantic)...)
+		case "helmfile":
+			issues = append(issues, ValidateHelmfileSemanticMatchSpec(prefix+".semantic", *command.Semantic)...)
+		}
+	}
+	return issues
+}
+
+func ValidatePermissionEnvSpec(prefix string, env PermissionEnvSpec) []string {
+	var issues []string
+	issues = append(issues, validateNonEmptyStrings(prefix+".requires", env.Requires)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".missing", env.Missing)...)
 	return issues
 }
 
@@ -2650,6 +2886,14 @@ func ErrorStrings(errs []error) []string {
 
 func IsZeroPermissionSpec(spec PermissionSpec) bool {
 	return len(spec.Deny) == 0 && len(spec.Ask) == 0 && len(spec.Allow) == 0
+}
+
+func IsZeroPermissionCommandSpec(command PermissionCommandSpec) bool {
+	return command.Name == "" && command.Semantic == nil
+}
+
+func IsZeroPermissionEnvSpec(env PermissionEnvSpec) bool {
+	return len(env.Requires) == 0 && len(env.Missing) == 0
 }
 
 func IsZeroMatchSpec(match MatchSpec) bool {

@@ -164,15 +164,9 @@ allow / abstain`, and no-match fallback behavior.
 commands.
 
 Permission evaluation is ordered and deterministic. After rewrite,
-`cc-bash-proxy` separates raw rules (`pattern` / `patterns`) from structured
-rules (`match`) and evaluates them in this order:
-
-1. raw `deny`
-2. structured `deny`
-3. raw `ask`
-4. structured `ask`
-5. structured `allow`
-6. raw `allow`, only when `allow_unsafe_shell: true` is set
+`cc-bash-proxy` evaluates permission rules by effect: `deny`, then `ask`, then
+`allow`. Each rule may use `command`, `env`, or `patterns`; all specified
+predicate groups in a rule must match.
 
 The rewrite phase is normalization only. Permission rules are evaluated against
 the final rewritten command, not the original input or intermediate rewrite
@@ -184,29 +178,24 @@ unsafe command plan fails closed. When that happens, the rewritten command is
 still the command under evaluation, but `allow` is blocked and the fallback is
 `ask` unless an explicit deny rule matches.
 
-Raw rules are an escape hatch for full-command shell-shape matching. Structured
-rules are the default and preferred permission model. A raw `deny` or `ask`
-pattern for the full command wins before composition, even when every extracted
-command would otherwise be allowed. A structured `deny` or `ask` for an
-extracted command wins before raw `allow`, even if that raw allow explicitly
-sets `allow_unsafe_shell: true`.
+`command` is the preferred permission model. It matches the parsed command name
+and can include command-specific `semantic` fields. `env` matches execution
+environment variables through `requires` and `missing`. `patterns` is the raw
+regex escape hatch over the final rewritten command string. `pattern` does not
+exist, and permission `match` does not exist; rewrite `match` is separate and
+unchanged. Permission `command` does not support `command_in`; use multiple
+`patterns` entries for multi-command raw fallbacks.
 
-Raw `allow` is dangerous and opt-in. It is disabled unless the rule explicitly
-sets `allow_unsafe_shell: true`, which can grant permission to the whole matched
-shell expression only after the rewritten command passes the fail-closed
-evaluation safety gate. Without that opt-in, raw allow patterns do not allow
-the raw command; use structured `match` rules for normal allow cases.
-
-Structured permission `match` supports command-specific semantic matching. The
-`match.command` value is the discriminator for the `semantic` schema; do not
+Permission `command` supports command-specific semantic matching. The
+`command.name` value is the discriminator for the `semantic` schema; do not
 nest another command key under `semantic`; for example, use `semantic.service`,
 not `semantic.aws.service`, `semantic.kubectl.verb`, `semantic.gh.area`, or
-`semantic.helmfile.verb`. Today `command: git`, `command: aws`,
-`command: kubectl`, `command: gh`, and `command: helmfile` have semantic
+`semantic.helmfile.verb`. Today `command.name: git`, `command.name: aws`,
+`command.name: kubectl`, `command.name: gh`, and `command.name: helmfile` have semantic
 schemas. Semantic matching is best-effort static parsing from argv, is not
 attempted by the `GenericParser` fallback, and unsupported fields or value
 types fail during `verify`. Semantic matching is permission-only and cannot be
-used in rewrite selectors or with raw `pattern` / `patterns`.
+used in rewrite selectors or with `patterns`.
 
 Discover supported semantic commands and command-specific fields from the CLI:
 
@@ -220,53 +209,53 @@ cc-bash-proxy semantic-schema git --format json
 ```yaml
 permission:
   deny:
-    - match:
-        command: git
+    - command:
+        name: git
         semantic:
           verb: push
           force: true
       message: "force push is blocked"
 
-    - match:
-        command: aws
+    - command:
+        name: aws
         semantic:
           service: s3
           operation_in: [rm, rb, delete-object, delete-bucket]
       message: "destructive S3 operation is blocked"
 
-    - match:
-        command: kubectl
+    - command:
+        name: kubectl
         semantic:
           verb: delete
           resource_type_in: [pod, deployment, namespace]
           namespace_in: [prod, production]
       message: "deleting production Kubernetes resources is blocked"
 
-    - match:
-        command: kubectl
+    - command:
+        name: kubectl
         semantic:
           context: prod
           verb_in: [delete, apply, scale, rollout]
       message: "mutating production cluster is blocked"
 
-    - match:
-        command: gh
+    - command:
+        name: gh
         semantic:
           area: api
           method_in: [POST, PUT, PATCH, DELETE]
           endpoint_prefix: /repos/
       message: "GitHub API mutation requires confirmation"
 
-    - match:
-        command: gh
+    - command:
+        name: gh
         semantic:
           area: pr
           verb: merge
           admin: true
       message: "admin PR merge is blocked"
 
-    - match:
-        command: helmfile
+    - command:
+        name: helmfile
         semantic:
           verb_in: [sync, apply, destroy, delete]
           environment_in: [prod, production]
@@ -274,53 +263,53 @@ permission:
       message: "non-interactive helmfile mutation in production is blocked"
 
   ask:
-    - match:
-        command: aws
+    - command:
+        name: aws
         semantic:
           service_in: [iam, eks, ecs, lambda]
       message: "AWS control-plane operation requires confirmation"
 
-    - match:
-        command: gh
+    - command:
+        name: gh
         semantic:
           area: pr
           verb_in: [create, merge, close, reopen, review, ready, update-branch]
       message: "PR mutation requires confirmation"
 
-    - match:
-        command: helmfile
+    - command:
+        name: helmfile
         semantic:
           verb: sync
           selector_missing: true
       message: "helmfile sync without selector requires confirmation"
 
   allow:
-    - match:
-        command: git
+    - command:
+        name: git
         semantic:
           verb_in: [status, diff, log, show, branch]
 
-    - match:
-        command: aws
+    - command:
+        name: aws
         semantic:
           service: sts
           operation: get-caller-identity
       message: "allow AWS identity check"
 
-    - match:
-        command: gh
+    - command:
+        name: gh
         semantic:
           area: pr
           verb_in: [view, list, diff, status, checks]
 
-    - match:
-        command: gh
+    - command:
+        name: gh
         semantic:
           area: run
           verb_in: [view, list, watch]
 
-    - match:
-        command: helmfile
+    - command:
+        name: helmfile
         semantic:
           verb_in: [diff, template, build, list, lint, status]
 ```
@@ -384,7 +373,7 @@ extracted command is denied.
 
 Process substitution is evaluated with the same fail-closed boundary. Commands
 inside `<(...)` and `>(...)` are extracted and evaluated for deny rules, but the
-whole shell expression is not allowed by structured or raw allow rules.
+whole shell expression is not allowed by command or patterns allow rules.
 
 Examples:
 
@@ -513,11 +502,8 @@ rewrite:
 
 permission:
   deny:
-    - match:
-        env_requires:
-          - "AWS_PROFILE"
-        args_contains:
-          - "--delete"
+    - patterns:
+        - '^\s*AWS_PROFILE=read-only-profile\s+aws\s+s3\s+rm\b'
       message: "delete is blocked"
       test:
         deny:
@@ -526,9 +512,10 @@ permission:
           - "AWS_PROFILE=read-only-profile aws sts get-caller-identity"
 
   ask:
-    - match:
-        command: aws
-        subcommand: s3
+    - command:
+        name: aws
+        semantic:
+          service: s3
       message: "s3 operations require confirmation"
       test:
         ask:
@@ -537,10 +524,12 @@ permission:
           - "AWS_PROFILE=read-only-profile aws sts get-caller-identity"
 
   allow:
-    - match:
-        command: aws
-        subcommand: sts
-        env_requires:
+    - command:
+        name: aws
+        semantic:
+          service: sts
+      env:
+        requires:
           - "AWS_PROFILE"
       test:
         allow:
@@ -567,14 +556,14 @@ semantic positional argument.
 inspect tokens recognized as options/flags by the command-specific semantic
 parser. They do not match when the command falls back to `GenericParser`.
 
-For `command: git`, `match.semantic` may use `verb`, `verb_in`, `remote`,
+For `command.name: git`, `command.semantic` may use `verb`, `verb_in`, `remote`,
 `remote_in`, `branch`, `branch_in`, `ref`, `ref_in`, boolean fields `force`,
 `hard`, `recursive`, `include_ignored`, `cached`, `staged`, plus
 `flags_contains` and `flags_prefixes`. For `git push`, `force: true` includes
 `--force`, `-f`, `--force-with-lease`, and `--force-if-includes`; for
 `git clean`, it includes `-f` and `--force`.
 
-For `command: aws`, `match.semantic` may use `service`, `service_in`,
+For `command.name: aws`, `command.semantic` may use `service`, `service_in`,
 `operation`, `operation_in`, `profile`, `profile_in`, `region`, `region_in`,
 `endpoint_url`, `endpoint_url_prefix`, boolean fields `dry_run` and
 `no_cli_pager`, plus `flags_contains` and `flags_prefixes`. The AWS parser
@@ -584,7 +573,7 @@ reads `aws [global options] <service> <operation> ...`. `--profile` overrides
 `--no-dry-run` is present, so `dry_run: false` matches only explicit
 `--no-dry-run`; unknown is not treated as false.
 
-For `command: kubectl`, `match.semantic` may use `verb`, `verb_in`,
+For `command.name: kubectl`, `command.semantic` may use `verb`, `verb_in`,
 `subverb`, `subverb_in`, `resource_type`, `resource_type_in`,
 `resource_name`, `resource_name_in`, `namespace`, `namespace_in`, `context`,
 `context_in`, `kubeconfig`, boolean fields `all_namespaces`, `dry_run`,
@@ -598,7 +587,7 @@ reads static argv only: it does not read manifest files or query Kubernetes.
 `-l` / `--selector` set selector; `-c` / `--container` sets container.
 `rollout restart` is represented as `verb: rollout` and `subverb: restart`.
 
-For `command: gh`, `match.semantic` may use common fields `area`, `area_in`,
+For `command.name: gh`, `command.semantic` may use common fields `area`, `area_in`,
 `verb`, `verb_in`, `repo`, `repo_in`, `hostname`, `hostname_in`, `web`,
 `flags_contains`, and `flags_prefixes`. Initial deep support covers
 `gh api`, `gh pr`, and `gh run`; other `gh` areas expose only `area` and
@@ -621,7 +610,7 @@ matches; `create`, `merge`, `close`, `reopen`, `review`, `ready`, and
 `exit_status`, and `job`. `view`, `list`, and `watch` are typical read-only
 matches; `cancel`, `delete`, and `rerun` change GitHub Actions state.
 
-For `command: helmfile`, `match.semantic` may use `verb`, `verb_in`,
+For `command.name: helmfile`, `command.semantic` may use `verb`, `verb_in`,
 `environment`, `environment_in`, `environment_missing`, `file`, `file_in`,
 `file_prefix`, `file_missing`, `namespace`, `namespace_in`,
 `namespace_missing`, `kube_context`, `kube_context_in`,
@@ -649,10 +638,8 @@ Typical mutation guards use `sync`, `apply`, `destroy`, and deprecated
 `build`, `list`, `lint`, and `status`, but static parsing does not prove that
 hooks or plugins are side-effect free.
 
-`semantic` requires exact `match.command`; `command_in` with `semantic` is
-invalid. `subcommand` with `semantic` is invalid because command-specific
-semantic fields are more precise. Unsupported semantic fields, unsupported
-value types, command/schema mismatches, and `rewrite.match.semantic` fail
+`semantic` requires exact `command.name`. Unsupported semantic fields,
+unsupported value types, command/schema mismatches, and `rewrite.match.semantic` fail
 `cc-bash-proxy verify`.
 
 ## Current Design

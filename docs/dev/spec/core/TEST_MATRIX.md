@@ -45,7 +45,7 @@ The matrix must preserve these invariants:
 
 - `deny` must not become `allow`
 - unsafe shell shapes must not become automatic `allow`
-- raw `allow` must not become broader without explicit opt-in and tests
+- `patterns` allow must not bypass fail-closed shell safety
 - parser removal or generic fallback must not widen a semantic rule to `allow`
 - Claude `migration_compat`, `strict`, and `cc_bash_proxy_authoritative` must
   have explicit, tested differences
@@ -89,14 +89,13 @@ available, evaluation must ask instead of falling through to a broader allow.
 
 ### Permission
 
-- raw `deny`
-- raw `ask`
-- raw `allow`
-- structured match
+- `patterns` deny
+- `patterns` ask
+- `patterns` allow
+- command/env predicates
 
-Raw `deny` and `ask` keep their priority. Raw `allow` must remain narrow and
-must not authorize unsafe shell syntax unless the rule explicitly opts into the
-supported raw allow path and the command remains safe for evaluation.
+`patterns` deny and ask keep their priority. `patterns` allow must remain
+narrow and must not authorize unsafe shell syntax.
 
 ### Merge Mode
 

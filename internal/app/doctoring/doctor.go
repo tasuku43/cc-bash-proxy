@@ -86,10 +86,10 @@ func Run(loaded configrepo.Loaded, tool string, cwd string, home string) Report 
 		checks = append(checks, Check{ID: "rewrite.pattern-broadness", Category: "diagnostics", Status: StatusPass, Message: "rewrite matches are not obviously broad"})
 	}
 
-	if ids := unsafeAllowNames(loaded.Pipeline); len(ids) > 0 {
-		checks = append(checks, Check{ID: "permission.unsafe-shell-allow", Category: "permission", Status: StatusWarn, Message: "explicit unsafe shell allow enabled: " + strings.Join(ids, ", ")})
+	if ids := envOnlyAllowNames(loaded.Pipeline); len(ids) > 0 {
+		checks = append(checks, Check{ID: "permission.env-only-allow", Category: "permission", Status: StatusWarn, Message: "env-only allow rules are broad: " + strings.Join(ids, ", ")})
 	} else {
-		checks = append(checks, Check{ID: "permission.unsafe-shell-allow", Category: "permission", Status: StatusPass, Message: "no explicit unsafe shell allow rules"})
+		checks = append(checks, Check{ID: "permission.env-only-allow", Category: "permission", Status: StatusPass, Message: "no env-only allow rules"})
 	}
 
 	mergeMode := claudePermissionMergeMode(loaded.Pipeline)
@@ -249,10 +249,10 @@ func broadnessWarning(p policy.Pipeline) string {
 	return ""
 }
 
-func unsafeAllowNames(p policy.Pipeline) []string {
+func envOnlyAllowNames(p policy.Pipeline) []string {
 	var ids []string
 	for i, rule := range p.Permission.Allow {
-		if rule.AllowUnsafeShell {
+		if policy.IsZeroPermissionCommandSpec(rule.Command) && len(rule.Patterns) == 0 && !policy.IsZeroPermissionEnvSpec(rule.Env) {
 			ids = append(ids, scopeName("permission.allow", i))
 		}
 	}

@@ -24,7 +24,8 @@ func TestEvaluateRewriteThenAllow(t *testing.T) {
 		}},
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", Subcommand: "sts", EnvRequires: []string{"AWS_PROFILE"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "sts"}},
+				Env:     PermissionEnvSpec{Requires: []string{"AWS_PROFILE"}},
 				Test: PermissionTestSpec{
 					Allow: []string{"AWS_PROFILE=read-only aws sts get-caller-identity"},
 					Pass:  []string{"AWS_PROFILE=read-only aws s3 ls"},
@@ -58,10 +59,11 @@ func TestEvaluatePermissionUsesFinalRewrittenCommandOnly(t *testing.T) {
 		}},
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Pattern: `^aws --profile read-only `,
+				Patterns: []string{`^aws --profile read-only `},
 			}},
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", Subcommand: "sts", EnvRequires: []string{"AWS_PROFILE"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "sts"}},
+				Env:     PermissionEnvSpec{Requires: []string{"AWS_PROFILE"}},
 			}},
 		},
 	}, Source{})
@@ -88,7 +90,7 @@ func TestEvaluateRewriteTraceIncludesBeforeAfterSafety(t *testing.T) {
 			},
 		}},
 		Permission: PermissionSpec{
-			Allow: []PermissionRuleSpec{{Match: MatchSpec{Command: "aws", Subcommand: "sts", EnvRequires: []string{"AWS_PROFILE"}}}},
+			Allow: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "sts"}}, Env: PermissionEnvSpec{Requires: []string{"AWS_PROFILE"}}}},
 		},
 	}, Source{})
 
@@ -130,16 +132,16 @@ func TestEvaluatePermissionPriorityDenyAskAllow(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", ArgsContains: []string{"--delete"}},
-				Test:  PermissionTestSpec{Deny: []string{"aws s3 rm --delete"}, Pass: []string{"aws s3 ls"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "s3", Operation: "rm"}},
+				Test:    PermissionTestSpec{Deny: []string{"aws s3 rm --delete"}, Pass: []string{"aws s3 ls"}},
 			}},
 			Ask: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", Subcommand: "s3"},
-				Test:  PermissionTestSpec{Ask: []string{"aws s3 ls"}, Pass: []string{"aws sts get-caller-identity"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "s3"}},
+				Test:    PermissionTestSpec{Ask: []string{"aws s3 ls"}, Pass: []string{"aws sts get-caller-identity"}},
 			}},
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", Subcommand: "sts"},
-				Test:  PermissionTestSpec{Allow: []string{"aws sts get-caller-identity"}, Pass: []string{"aws s3 ls"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "sts"}},
+				Test:    PermissionTestSpec{Allow: []string{"aws sts get-caller-identity"}, Pass: []string{"aws s3 ls"}},
 			}},
 		},
 		Test: PipelineTestSpec{{In: "aws sts get-caller-identity", Decision: "allow"}},
@@ -168,11 +170,11 @@ func TestEvaluatePermissionPriorityDenyAskAllow(t *testing.T) {
 	}
 }
 
-func TestEvaluateGitArgsContainsUsesRawWordsForCompatibility(t *testing.T) {
+func TestEvaluateGitFlagsContainsUsesSemanticFlags(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Ask: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", ArgsContains: []string{"--short"}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status", FlagsContains: []string{"--short"}}},
 			}},
 		},
 	}, Source{})
@@ -186,11 +188,11 @@ func TestEvaluateGitArgsContainsUsesRawWordsForCompatibility(t *testing.T) {
 	}
 }
 
-func TestEvaluateGitArgsContainsMatchesGlobalOptionRawWords(t *testing.T) {
+func TestEvaluateGitSemanticVerbIgnoresGlobalOptionRawWords(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Ask: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", ArgsContains: []string{"-C"}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}},
 			}},
 		},
 	}, Source{})
@@ -216,8 +218,8 @@ func TestGenericParserSemanticGuardPreventsDenyToAllowRegression(t *testing.T) {
 
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
-			Deny:  []PermissionRuleSpec{{Match: MatchSpec{Command: "git", Subcommand: "status"}}},
-			Allow: []PermissionRuleSpec{{Match: MatchSpec{Command: "git"}}},
+			Deny:  []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}}},
+			Allow: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git"}}},
 		},
 	}, Source{})
 
@@ -247,8 +249,8 @@ func TestValidatePipelineRejectsUnknownClaudePermissionMergeMode(t *testing.T) {
 		ClaudePermissionMergeMode: "loose",
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Subcommand: "status"},
-				Test:  PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}},
+				Test:    PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
 			}},
 		},
 		Test: PipelineTestSpec{{In: "git status", Decision: "allow"}},
@@ -626,32 +628,32 @@ func TestEvaluateGhSemanticPermissionOutcomes(t *testing.T) {
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{
 				{
-					Match:   MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Area: "pr", Verb: "merge", Admin: boolPtr(true)}},
+					Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Area: "pr", Verb: "merge", Admin: boolPtr(true)}},
 					Message: "admin PR merge is blocked",
 				},
 				{
-					Match:   MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Area: "run", VerbIn: []string{"delete", "cancel"}}},
+					Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Area: "run", VerbIn: []string{"delete", "cancel"}}},
 					Message: "workflow run deletion/cancellation is blocked",
 				},
 			},
 			Ask: []PermissionRuleSpec{
 				{
-					Match:   MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Area: "pr", VerbIn: []string{"create", "merge", "close", "reopen", "review", "ready", "update-branch"}}},
+					Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Area: "pr", VerbIn: []string{"create", "merge", "close", "reopen", "review", "ready", "update-branch"}}},
 					Message: "PR mutation requires confirmation",
 				},
 				{
-					Match:   MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Area: "run", Verb: "rerun"}},
+					Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Area: "run", Verb: "rerun"}},
 					Message: "workflow rerun requires confirmation",
 				},
 				{
-					Match:   MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Area: "api", MethodIn: []string{"POST", "PUT", "PATCH", "DELETE"}}},
+					Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Area: "api", MethodIn: []string{"POST", "PUT", "PATCH", "DELETE"}}},
 					Message: "GitHub API mutation requires confirmation",
 				},
 			},
 			Allow: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Area: "pr", VerbIn: []string{"view", "list", "diff", "status", "checks"}}}},
-				{Match: MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Area: "run", VerbIn: []string{"view", "list", "watch"}}}},
-				{Match: MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Area: "api", Method: "GET", EndpointPrefix: "/repos/"}}},
+				{Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Area: "pr", VerbIn: []string{"view", "list", "diff", "status", "checks"}}}},
+				{Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Area: "run", VerbIn: []string{"view", "list", "watch"}}}},
+				{Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Area: "api", Method: "GET", EndpointPrefix: "/repos/"}}},
 			},
 		},
 	}, Source{})
@@ -685,15 +687,15 @@ func TestEvaluateAWSSemanticPermissionOutcomes(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Match:   MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Service: "s3", OperationIn: []string{"rm", "rb", "delete-object", "delete-bucket"}}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "s3", OperationIn: []string{"rm", "rb", "delete-object", "delete-bucket"}}},
 				Message: "destructive S3 operation is blocked",
 			}},
 			Ask: []PermissionRuleSpec{{
-				Match:   MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{ServiceIn: []string{"iam"}}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{ServiceIn: []string{"iam"}}},
 				Message: "AWS control-plane operation requires confirmation",
 			}},
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Service: "sts", Operation: "get-caller-identity"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "sts", Operation: "get-caller-identity"}},
 			}},
 		},
 	}, Source{})
@@ -749,15 +751,15 @@ func TestEvaluateKubectlSemanticPermissionOutcomes(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Match:   MatchSpec{Command: "kubectl", Semantic: &SemanticMatchSpec{Verb: "delete", ResourceType: "pod", Namespace: "prod"}},
+				Command: PermissionCommandSpec{Name: "kubectl", Semantic: &SemanticMatchSpec{Verb: "delete", ResourceType: "pod", Namespace: "prod"}},
 				Message: "deleting production Kubernetes resources is blocked",
 			}},
 			Ask: []PermissionRuleSpec{{
-				Match:   MatchSpec{Command: "kubectl", Semantic: &SemanticMatchSpec{VerbIn: []string{"apply", "patch", "scale", "rollout", "delete"}}},
+				Command: PermissionCommandSpec{Name: "kubectl", Semantic: &SemanticMatchSpec{VerbIn: []string{"apply", "patch", "scale", "rollout", "delete"}}},
 				Message: "Kubernetes mutation requires confirmation",
 			}},
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "kubectl", Semantic: &SemanticMatchSpec{VerbIn: []string{"get", "describe", "logs"}, Namespace: "default"}},
+				Command: PermissionCommandSpec{Name: "kubectl", Semantic: &SemanticMatchSpec{VerbIn: []string{"get", "describe", "logs"}, Namespace: "default"}},
 			}},
 		},
 	}, Source{})
@@ -788,26 +790,26 @@ func TestEvaluateHelmfileSemanticPermissionOutcomes(t *testing.T) {
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{
 				{
-					Match:   MatchSpec{Command: "helmfile", Semantic: &SemanticMatchSpec{VerbIn: []string{"sync", "apply", "destroy", "delete"}, EnvironmentIn: []string{"prod", "production"}, Interactive: boolPtr(false)}},
+					Command: PermissionCommandSpec{Name: "helmfile", Semantic: &SemanticMatchSpec{VerbIn: []string{"sync", "apply", "destroy", "delete"}, EnvironmentIn: []string{"prod", "production"}, Interactive: boolPtr(false)}},
 					Message: "non-interactive helmfile mutation in production is blocked",
 				},
 				{
-					Match:   MatchSpec{Command: "helmfile", Semantic: &SemanticMatchSpec{Verb: "destroy", EnvironmentIn: []string{"prod", "production"}}},
+					Command: PermissionCommandSpec{Name: "helmfile", Semantic: &SemanticMatchSpec{Verb: "destroy", EnvironmentIn: []string{"prod", "production"}}},
 					Message: "helmfile destroy in production is blocked",
 				},
 			},
 			Ask: []PermissionRuleSpec{
 				{
-					Match:   MatchSpec{Command: "helmfile", Semantic: &SemanticMatchSpec{VerbIn: []string{"sync", "apply", "destroy", "delete"}}},
+					Command: PermissionCommandSpec{Name: "helmfile", Semantic: &SemanticMatchSpec{VerbIn: []string{"sync", "apply", "destroy", "delete"}}},
 					Message: "helmfile mutation requires confirmation",
 				},
 				{
-					Match:   MatchSpec{Command: "helmfile", Semantic: &SemanticMatchSpec{Verb: "sync", SelectorMissing: boolPtr(true)}},
+					Command: PermissionCommandSpec{Name: "helmfile", Semantic: &SemanticMatchSpec{Verb: "sync", SelectorMissing: boolPtr(true)}},
 					Message: "helmfile sync without selector requires confirmation",
 				},
 			},
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "helmfile", Semantic: &SemanticMatchSpec{VerbIn: []string{"diff", "template", "build", "list", "lint", "status"}}},
+				Command: PermissionCommandSpec{Name: "helmfile", Semantic: &SemanticMatchSpec{VerbIn: []string{"diff", "template", "build", "list", "lint", "status"}}},
 			}},
 		},
 	}, Source{})
@@ -838,7 +840,7 @@ func TestEvaluateTraceIncludesHelmfileSemanticInfo(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "helmfile", Semantic: &SemanticMatchSpec{Verb: "sync", Environment: "prod", File: "helmfile.prod.yaml", Namespace: "prod", KubeContext: "prod-cluster", SelectorContains: []string{"app=foo"}, Interactive: boolPtr(false)}},
+				Command: PermissionCommandSpec{Name: "helmfile", Semantic: &SemanticMatchSpec{Verb: "sync", Environment: "prod", File: "helmfile.prod.yaml", Namespace: "prod", KubeContext: "prod-cluster", SelectorContains: []string{"app=foo"}, Interactive: boolPtr(false)}},
 			}},
 		},
 	}, Source{})
@@ -871,15 +873,15 @@ func TestEvaluateGitSemanticPermissionOutcomes(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Match:   MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{Verb: "push", Force: boolPtr(true)}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "push", Force: boolPtr(true)}},
 				Message: "force push is blocked",
 			}},
 			Ask: []PermissionRuleSpec{{
-				Match:   MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{VerbIn: []string{"push", "reset", "rebase", "clean"}}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{VerbIn: []string{"push", "reset", "rebase", "clean"}}},
 				Message: "dangerous git operation requires confirmation",
 			}},
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{VerbIn: []string{"status", "diff", "log", "show", "branch"}}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{VerbIn: []string{"status", "diff", "log", "show", "branch"}}},
 			}},
 		},
 	}, Source{})
@@ -909,7 +911,7 @@ func TestEvaluateTraceIncludesSemanticMatcherInfo(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{Verb: "push", Force: boolPtr(true)}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "push", Force: boolPtr(true)}},
 			}},
 		},
 	}, Source{})
@@ -934,7 +936,7 @@ func TestEvaluateTraceIncludesAWSSemanticInfo(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Service: "sts", Operation: "get-caller-identity", Profile: "prod", Region: "ap-northeast-1"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "sts", Operation: "get-caller-identity", Profile: "prod", Region: "ap-northeast-1"}},
 			}},
 		},
 	}, Source{})
@@ -964,7 +966,7 @@ func TestEvaluateTraceIncludesKubectlSemanticInfo(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "kubectl", Semantic: &SemanticMatchSpec{Verb: "get", ResourceType: "pods", Namespace: "default", Context: "dev"}},
+				Command: PermissionCommandSpec{Name: "kubectl", Semantic: &SemanticMatchSpec{Verb: "get", ResourceType: "pods", Namespace: "default", Context: "dev"}},
 			}},
 		},
 	}, Source{})
@@ -994,7 +996,7 @@ func TestEvaluateTraceIncludesGhSemanticInfo(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Area: "api", Method: "GET", EndpointPrefix: "/repos/", Repo: "owner/repo"}},
+				Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Area: "api", Method: "GET", EndpointPrefix: "/repos/", Repo: "owner/repo"}},
 			}},
 		},
 	}, Source{})
@@ -1029,37 +1031,37 @@ func TestEvaluateStructuredAllowFailsClosedOnUnsafeShellExpressions(t *testing.T
 		{
 			name:    "and list",
 			command: "git status && rm -rf /tmp/x",
-			rule:    PermissionRuleSpec{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
 		},
 		{
 			name:    "semicolon list",
 			command: "git status; rm -rf /tmp/x",
-			rule:    PermissionRuleSpec{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
 		},
 		{
 			name:    "pipe",
 			command: "git status | sh",
-			rule:    PermissionRuleSpec{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
 		},
 		{
 			name:    "redirect",
 			command: "git status > /tmp/out",
-			rule:    PermissionRuleSpec{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
 		},
 		{
 			name:    "comment",
 			command: "git status # harmless-looking comment",
-			rule:    PermissionRuleSpec{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
 		},
 		{
 			name:    "bash c compound",
 			command: "bash -c 'git status && rm -rf /tmp/x'",
-			rule:    PermissionRuleSpec{Match: MatchSpec{Command: "bash", Subcommand: "-c"}},
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "bash"}},
 		},
 		{
 			name:    "bash c redirect",
 			command: "bash -c 'git status > /tmp/out'",
-			rule:    PermissionRuleSpec{Match: MatchSpec{Command: "bash", Subcommand: "-c"}},
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "bash"}},
 		},
 	}
 
@@ -1105,7 +1107,7 @@ func TestEvaluateGitStatusAllowMatchesSupportedGlobalOptions(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Subcommand: "status"},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}},
 			}},
 		},
 	}, Source{})
@@ -1146,7 +1148,7 @@ func TestEvaluateGitStatusAllowDoesNotMatchNonStatusOrUnsafeShell(t *testing.T) 
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Subcommand: "status"},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}},
 			}},
 		},
 	}, Source{})
@@ -1177,7 +1179,7 @@ func TestEvaluateGitStatusAllowDoesNotMatchNonStatusOrUnsafeShell(t *testing.T) 
 
 func TestEvaluateCompoundGitCommandsComposeIndividualCommandDecisions(t *testing.T) {
 	gitRule := func(subcommand string) PermissionRuleSpec {
-		return PermissionRuleSpec{Match: MatchSpec{Command: "git", Subcommand: subcommand}}
+		return PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: subcommand}}}
 	}
 
 	tests := []struct {
@@ -1269,12 +1271,12 @@ func TestEvaluateRawDenyPatternBeatsCompositionAllow(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Pattern: `^\s*git\s+status\s*&&\s*git\s+diff\s*$`,
-				Message: "raw compound denied",
+				Patterns: []string{`^\s*git\s+status\s*&&\s*git\s+diff\s*$`},
+				Message:  "raw compound denied",
 			}},
 			Allow: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
-				{Match: MatchSpec{Command: "git", Subcommand: "diff"}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "diff"}}},
 			},
 		},
 	}, Source{})
@@ -1287,7 +1289,7 @@ func TestEvaluateRawDenyPatternBeatsCompositionAllow(t *testing.T) {
 		t.Fatalf("Outcome = %q, want deny; decision=%+v", got.Outcome, got)
 	}
 	if got.Message != "raw compound denied" {
-		t.Fatalf("Message = %q, want raw deny message; decision=%+v", got.Message, got)
+		t.Fatalf("Message = %q, want patterns deny message; decision=%+v", got.Message, got)
 	}
 	if steps := traceStepsByName(got.Trace, "composition"); len(steps) != 0 {
 		t.Fatalf("composition trace steps = %d, want 0; trace=%+v", len(steps), got.Trace)
@@ -1301,12 +1303,12 @@ func TestEvaluateRawAskPatternBeatsCompositionAllow(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Ask: []PermissionRuleSpec{{
-				Pattern: `^\s*git\s+status\s*&&\s*git\s+diff\s*$`,
-				Message: "raw compound asks",
+				Patterns: []string{`^\s*git\s+status\s*&&\s*git\s+diff\s*$`},
+				Message:  "raw compound asks",
 			}},
 			Allow: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
-				{Match: MatchSpec{Command: "git", Subcommand: "diff"}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "diff"}}},
 			},
 		},
 	}, Source{})
@@ -1319,7 +1321,7 @@ func TestEvaluateRawAskPatternBeatsCompositionAllow(t *testing.T) {
 		t.Fatalf("Outcome = %q, want ask; decision=%+v", got.Outcome, got)
 	}
 	if got.Message != "raw compound asks" {
-		t.Fatalf("Message = %q, want raw ask message; decision=%+v", got.Message, got)
+		t.Fatalf("Message = %q, want patterns ask message; decision=%+v", got.Message, got)
 	}
 	if steps := traceStepsByName(got.Trace, "composition"); len(steps) != 0 {
 		t.Fatalf("composition trace steps = %d, want 0; trace=%+v", len(steps), got.Trace)
@@ -1329,14 +1331,10 @@ func TestEvaluateRawAskPatternBeatsCompositionAllow(t *testing.T) {
 	}
 }
 
-func TestEvaluateUnsafeRawAllowPatternBeatsCompositionAsk(t *testing.T) {
+func TestEvaluatePatternsAllowDoesNotBeatCompositionAsk(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
-			Allow: []PermissionRuleSpec{{
-				Pattern:          `^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`,
-				AllowUnsafeShell: true,
-				Message:          "trusted full compound",
-			}},
+			Allow: []PermissionRuleSpec{{Patterns: []string{`^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`}}},
 		},
 	}, Source{})
 
@@ -1344,17 +1342,11 @@ func TestEvaluateUnsafeRawAllowPatternBeatsCompositionAsk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
-	if got.Outcome != "allow" {
-		t.Fatalf("Outcome = %q, want allow; decision=%+v", got.Outcome, got)
+	if got.Outcome != "ask" {
+		t.Fatalf("Outcome = %q, want ask; decision=%+v", got.Outcome, got)
 	}
-	if got.Message != "trusted full compound" {
-		t.Fatalf("Message = %q, want unsafe allow message; decision=%+v", got.Message, got)
-	}
-	if steps := traceStepsByName(got.Trace, "composition"); len(steps) != 0 {
-		t.Fatalf("composition trace steps = %d, want 0; trace=%+v", len(steps), got.Trace)
-	}
-	if last := got.Trace[len(got.Trace)-1]; last.RuleType != "raw" {
-		t.Fatalf("rule_type=%q, want raw; trace=%+v", last.RuleType, got.Trace)
+	if steps := traceStepsByName(got.Trace, "composition"); len(steps) == 0 {
+		t.Fatalf("composition trace missing; trace=%+v", got.Trace)
 	}
 }
 
@@ -1362,7 +1354,7 @@ func TestEvaluateRawAllowPatternWithoutUnsafeShellDoesNotBypassComposition(t *te
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Pattern: `^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`,
+				Patterns: []string{`^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`},
 			}},
 		},
 	}, Source{})
@@ -1376,11 +1368,11 @@ func TestEvaluateRawAllowPatternWithoutUnsafeShellDoesNotBypassComposition(t *te
 	}
 }
 
-func TestEvaluateRawAllowPatternWithoutUnsafeShellDoesNotAllowSimpleCommand(t *testing.T) {
+func TestEvaluatePatternsAllowMatchesSimpleCommand(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Pattern: `^\s*git\s+status\s*$`,
+				Patterns: []string{`^\s*git\s+status\s*$`},
 			}},
 		},
 	}, Source{})
@@ -1389,14 +1381,8 @@ func TestEvaluateRawAllowPatternWithoutUnsafeShellDoesNotAllowSimpleCommand(t *t
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
-	if got.Outcome != "abstain" {
-		t.Fatalf("Outcome = %q, want abstain; decision=%+v", got.Outcome, got)
-	}
-	if got.Explicit {
-		t.Fatalf("Explicit = true, want false; decision=%+v", got)
-	}
-	if got.Reason != "no_match" {
-		t.Fatalf("Reason = %q, want no_match; decision=%+v", got.Reason, got)
+	if got.Outcome != "allow" {
+		t.Fatalf("Outcome = %q, want allow; decision=%+v", got.Outcome, got)
 	}
 }
 
@@ -1404,13 +1390,12 @@ func TestEvaluateStructuredDenyBeatsUnsafeRawAllow(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Match:   MatchSpec{Command: "rm"},
+				Command: PermissionCommandSpec{Name: "rm"},
 				Message: "rm denied",
 			}},
 			Allow: []PermissionRuleSpec{{
-				Pattern:          `^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`,
-				AllowUnsafeShell: true,
-				Message:          "trusted full compound",
+				Patterns: []string{`^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`},
+				Message:  "trusted full compound",
 			}},
 		},
 	}, Source{})
@@ -1435,13 +1420,12 @@ func TestEvaluateStructuredAskBeatsUnsafeRawAllow(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Ask: []PermissionRuleSpec{{
-				Match:   MatchSpec{Command: "rm"},
+				Command: PermissionCommandSpec{Name: "rm"},
 				Message: "rm asks",
 			}},
 			Allow: []PermissionRuleSpec{{
-				Pattern:          `^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`,
-				AllowUnsafeShell: true,
-				Message:          "trusted full compound",
+				Patterns: []string{`^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`},
+				Message:  "trusted full compound",
 			}},
 		},
 	}, Source{})
@@ -1466,10 +1450,10 @@ func TestEvaluateCompoundDenyWinsOverAllowedCommands(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
 			},
 			Deny: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "rm"}},
+				{Command: PermissionCommandSpec{Name: "rm"}},
 			},
 		},
 	}, Source{})
@@ -1487,10 +1471,10 @@ func TestEvaluateCompoundAskWinsUnlessACommandIsDenied(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
 			},
 			Ask: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "git", Subcommand: "diff"}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "diff"}}},
 			},
 		},
 	}, Source{})
@@ -1507,7 +1491,7 @@ func TestEvaluateCompoundAskWinsUnlessACommandIsDenied(t *testing.T) {
 func TestEvaluateCompoundTraceIncludesPerCommandComposition(t *testing.T) {
 	src := Source{Layer: "project", Path: "/repo/.cc-bash-proxy/cc-bash-proxy.yml"}
 	gitRule := func(subcommand string) PermissionRuleSpec {
-		return PermissionRuleSpec{Match: MatchSpec{Command: "git", Subcommand: subcommand}}
+		return PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: subcommand}}}
 	}
 
 	tests := []struct {
@@ -1536,7 +1520,7 @@ func TestEvaluateCompoundTraceIncludesPerCommandComposition(t *testing.T) {
 			command: "git status && rm -rf /tmp/x",
 			permission: PermissionSpec{
 				Allow: []PermissionRuleSpec{gitRule("status")},
-				Deny:  []PermissionRuleSpec{{Match: MatchSpec{Command: "rm"}}},
+				Deny:  []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "rm"}}},
 			},
 			wantOutcome: "deny",
 			wantReason:  "command[1] denied",
@@ -1608,7 +1592,7 @@ func TestEvaluateCompoundDoesNotInferAllowFromLeftSideRawRule(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
 			},
 		},
 	}, Source{})
@@ -1626,8 +1610,8 @@ func TestEvaluatePipelineCompositionAllowsWhenEveryCommandAllowed(t *testing.T) 
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
-				{Match: MatchSpec{Command: "sh"}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
+				{Command: PermissionCommandSpec{Name: "sh"}},
 			},
 		},
 	}, Source{})
@@ -1655,7 +1639,7 @@ func TestEvaluateConservativeShellShapesAskEvenWhenCommandAllowed(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			p := NewPipeline(PipelineSpec{
 				Permission: PermissionSpec{
-					Allow: []PermissionRuleSpec{{Match: MatchSpec{Command: "git", Subcommand: "status"}}},
+					Allow: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}}},
 				},
 			}, Source{})
 
@@ -1680,13 +1664,13 @@ func TestEvaluateProcessSubstitutionCompositionDeniesExtractedCommands(t *testin
 		{
 			name:    "input process substitution",
 			command: "cat <(rm -rf /tmp/x)",
-			deny:    PermissionRuleSpec{Match: MatchSpec{Command: "rm", ArgsContains: []string{"-rf"}}},
+			deny:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "rm"}},
 			wantCmd: "rm -rf /tmp/x",
 		},
 		{
 			name:    "output process substitution",
 			command: "echo >(sh)",
-			deny:    PermissionRuleSpec{Match: MatchSpec{Command: "sh"}},
+			deny:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "sh"}},
 			wantCmd: "sh",
 		},
 	}
@@ -1726,8 +1710,8 @@ func TestEvaluateProcessSubstitutionAsksEvenWhenExtractedCommandsAllowed(t *test
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "cat"}},
-				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+				{Command: PermissionCommandSpec{Name: "cat"}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
 			},
 		},
 	}, Source{})
@@ -1749,8 +1733,8 @@ func TestEvaluateCompoundTraceIncludesLosslessShapeFlags(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{
-				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
-				{Match: MatchSpec{Command: "sh"}},
+				{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
+				{Command: PermissionCommandSpec{Name: "sh"}},
 			},
 		},
 	}, Source{})
@@ -1808,11 +1792,20 @@ func firstTraceStepByName(trace []TraceStep, name string) *TraceStep {
 	return nil
 }
 
+func containsIssue(issues []string, want string) bool {
+	for _, issue := range issues {
+		if strings.Contains(issue, want) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEvaluatePatternAllowFailsClosedOnUnsafeShellExpressions(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Pattern: `^\s*git\s+status\s*\|\s*sh$`,
+				Patterns: []string{`^\s*git\s+status\s*\|\s*sh$`},
 			}},
 		},
 	}, Source{})
@@ -1830,9 +1823,8 @@ func TestEvaluateSyntaxErrorFailsClosedBeforeAllow(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Pattern:          `.*`,
-				AllowUnsafeShell: true,
-				Message:          "unsafe raw allow",
+				Patterns: []string{`.*`},
+				Message:  "broad patterns allow",
 			}},
 		},
 	}, Source{})
@@ -1857,13 +1849,12 @@ func TestEvaluateUnsafeCommandStillAppliesRawDeny(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Deny: []PermissionRuleSpec{{
-				Pattern: `^\s*rm\s+-rf\s+/tmp/x\s*&&`,
-				Message: "raw deny wins",
+				Patterns: []string{`^\s*rm\s+-rf\s+/tmp/x\s*&&`},
+				Message:  "patterns deny wins",
 			}},
 			Allow: []PermissionRuleSpec{{
-				Pattern:          `.*`,
-				AllowUnsafeShell: true,
-				Message:          "unsafe raw allow",
+				Patterns: []string{`.*`},
+				Message:  "broad patterns allow",
 			}},
 		},
 	}, Source{})
@@ -1875,8 +1866,8 @@ func TestEvaluateUnsafeCommandStillAppliesRawDeny(t *testing.T) {
 	if got.Outcome != "deny" {
 		t.Fatalf("Outcome = %q, want deny; decision=%+v", got.Outcome, got)
 	}
-	if got.Message != "raw deny wins" {
-		t.Fatalf("Message = %q, want raw deny message; decision=%+v", got.Message, got)
+	if got.Message != "patterns deny wins" {
+		t.Fatalf("Message = %q, want patterns deny message; decision=%+v", got.Message, got)
 	}
 	step := firstTraceStepByName(got.Trace, "fail_closed")
 	if step == nil || step.Reason != "parse_error" {
@@ -1888,9 +1879,8 @@ func TestEvaluateUnknownShapeIgnoresUnsafeRawAllow(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Pattern:          `^\s*cat\s+<\(git\s+status\)\s*$`,
-				AllowUnsafeShell: true,
-				Message:          "unsafe raw allow",
+				Patterns: []string{`^\s*cat\s+<\(git\s+status\)\s*$`},
+				Message:  "broad patterns allow",
 			}},
 		},
 	}, Source{})
@@ -1915,13 +1905,12 @@ func TestEvaluateUnknownShapeIgnoresUnsafeRawAllow(t *testing.T) {
 	}
 }
 
-func TestEvaluatePatternAllowCanOptInToUnsafeShellExpressions(t *testing.T) {
+func TestEvaluatePatternsAllowFailsClosedOnUnsafeShellExpressions(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Pattern:          `^\s*git\s+status\s*\|\s*sh$`,
-				AllowUnsafeShell: true,
-				Message:          "allow trusted pipeline",
+				Patterns: []string{`^\s*git\s+status\s*\|\s*sh$`},
+				Message:  "allow trusted pipeline",
 			}},
 		},
 	}, Source{})
@@ -1930,12 +1919,12 @@ func TestEvaluatePatternAllowCanOptInToUnsafeShellExpressions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
-	if got.Outcome != "allow" {
+	if got.Outcome != "ask" {
 		t.Fatalf("got %+v", got)
 	}
 }
 
-func TestEvaluatePatternsAllowCanOptInToUnsafeShellExpressions(t *testing.T) {
+func TestEvaluatePatternsListAllowFailsClosedOnUnsafeShellExpressions(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
@@ -1943,8 +1932,7 @@ func TestEvaluatePatternsAllowCanOptInToUnsafeShellExpressions(t *testing.T) {
 					`^\s*git\s+status\s*\|\s*sh$`,
 					`^\s*git\s+diff\s*\|\s*sh$`,
 				},
-				AllowUnsafeShell: true,
-				Message:          "allow trusted pipelines",
+				Message: "allow trusted pipelines",
 			}},
 		},
 	}, Source{})
@@ -1953,19 +1941,143 @@ func TestEvaluatePatternsAllowCanOptInToUnsafeShellExpressions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
-	if got.Outcome != "allow" {
+	if got.Outcome != "ask" {
 		t.Fatalf("got %+v", got)
 	}
 }
 
-func TestValidatePermissionRuleRequiresMessageForUnsafeAllow(t *testing.T) {
+func TestValidatePermissionRuleAcceptsPatternsAllow(t *testing.T) {
 	issues := ValidatePermissionRule("permission.allow[0]", PermissionRuleSpec{
-		Pattern:          `^\s*git\s+status\s*\|\s*sh$`,
-		AllowUnsafeShell: true,
-		Test:             PermissionTestSpec{Allow: []string{"git status | sh"}, Pass: []string{"git status"}},
+		Patterns: []string{`^\s*git\s+status$`},
+		Test:     PermissionTestSpec{Allow: []string{"git status"}, Pass: []string{"git diff"}},
 	}, "allow")
-	if len(issues) == 0 {
-		t.Fatal("expected validation issues")
+	if len(issues) != 0 {
+		t.Fatalf("issues=%#v", issues)
+	}
+}
+
+func TestEvaluatePermissionPredicateCombinations(t *testing.T) {
+	tests := []struct {
+		name    string
+		rule    PermissionRuleSpec
+		effect  string
+		command string
+		want    string
+	}{
+		{
+			name:    "command only allow",
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git"}},
+			effect:  "allow",
+			command: "git status",
+			want:    "allow",
+		},
+		{
+			name:    "command semantic deny",
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "push", Force: boolPtr(true)}}},
+			effect:  "deny",
+			command: "git push --force origin main",
+			want:    "deny",
+		},
+		{
+			name:    "command env allow",
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "aws"}, Env: PermissionEnvSpec{Requires: []string{"AWS_PROFILE"}}},
+			effect:  "allow",
+			command: "AWS_PROFILE=dev aws sts get-caller-identity",
+			want:    "allow",
+		},
+		{
+			name:    "command semantic env allow",
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Service: "sts", Operation: "get-caller-identity"}}, Env: PermissionEnvSpec{Requires: []string{"AWS_PROFILE"}}},
+			effect:  "allow",
+			command: "AWS_PROFILE=dev aws sts get-caller-identity",
+			want:    "allow",
+		},
+		{
+			name:    "patterns env ask",
+			rule:    PermissionRuleSpec{Patterns: []string{`^KUBECONFIG=.*helm\s+upgrade\b`}, Env: PermissionEnvSpec{Requires: []string{"KUBECONFIG"}}},
+			effect:  "ask",
+			command: "KUBECONFIG=prod helm upgrade app chart",
+			want:    "ask",
+		},
+		{
+			name:    "env only deny",
+			rule:    PermissionRuleSpec{Env: PermissionEnvSpec{Requires: []string{"CI"}}},
+			effect:  "deny",
+			command: "CI=true git status",
+			want:    "deny",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := PermissionSpec{}
+			switch tt.effect {
+			case "deny":
+				spec.Deny = []PermissionRuleSpec{tt.rule}
+			case "ask":
+				spec.Ask = []PermissionRuleSpec{tt.rule}
+			case "allow":
+				spec.Allow = []PermissionRuleSpec{tt.rule}
+			}
+			got, err := Evaluate(NewPipeline(PipelineSpec{Permission: spec}, Source{}), tt.command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != tt.want {
+				t.Fatalf("Outcome=%q want %q decision=%+v", got.Outcome, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestValidatePermissionPredicateInvalidForms(t *testing.T) {
+	tests := []struct {
+		name  string
+		rule  PermissionRuleSpec
+		issue string
+	}{
+		{
+			name:  "command patterns invalid",
+			rule:  PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git"}, Patterns: []string{`^git`}},
+			issue: "permission.allow[0] cannot combine command and patterns",
+		},
+		{
+			name:  "semantic without command name invalid",
+			rule:  PermissionRuleSpec{Command: PermissionCommandSpec{Semantic: &SemanticMatchSpec{Verb: "status"}}},
+			issue: "permission.allow[0].command.name must be set when semantic is used",
+		},
+		{
+			name:  "empty command name invalid",
+			rule:  PermissionRuleSpec{Command: PermissionCommandSpec{Name: " "}},
+			issue: "permission.allow[0].command.name must be non-empty",
+		},
+		{
+			name:  "empty env entry invalid",
+			rule:  PermissionRuleSpec{Env: PermissionEnvSpec{Requires: []string{""}}},
+			issue: "permission.allow[0].env.requires[0] must be non-empty",
+		},
+		{
+			name:  "empty patterns entry invalid",
+			rule:  PermissionRuleSpec{Patterns: []string{""}},
+			issue: "permission.allow[0].patterns[0] must be non-empty",
+		},
+		{
+			name:  "invalid regex invalid",
+			rule:  PermissionRuleSpec{Patterns: []string{"["}},
+			issue: "permission.allow[0].patterns[0] must compile",
+		},
+		{
+			name:  "whitespace name invalid",
+			rule:  PermissionRuleSpec{Name: " ", Command: PermissionCommandSpec{Name: "git"}},
+			issue: "permission.allow[0].name must be non-empty",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issues := ValidatePermissionRule("permission.allow[0]", tt.rule, "allow")
+			if !containsIssue(issues, tt.issue) {
+				t.Fatalf("issues=%#v want containing %q", issues, tt.issue)
+			}
+		})
 	}
 }
 
@@ -1978,100 +2090,72 @@ func TestValidateSemanticMatchRules(t *testing.T) {
 		{
 			name: "semantic without command",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Semantic: &SemanticMatchSpec{Verb: "push"}},
+				Command: PermissionCommandSpec{Semantic: &SemanticMatchSpec{Verb: "push"}},
 			}}}},
-			issue: "permission.deny[0].match.command must be set when semantic is used",
-		},
-		{
-			name: "command_in with semantic",
-			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{CommandIn: []string{"git", "gh"}, Semantic: &SemanticMatchSpec{Verb: "push"}},
-			}}}},
-			issue: "permission.deny[0].match.command_in cannot be used with semantic",
+			issue: "permission.deny[0].command.name must be set when semantic is used",
 		},
 		{
 			name: "non git command",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "ls", Semantic: &SemanticMatchSpec{Verb: "push"}},
+				Command: PermissionCommandSpec{Name: "ls", Semantic: &SemanticMatchSpec{Verb: "push"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic is only supported for command: git, command: aws, command: kubectl, command: gh, or command: helmfile",
+			issue: "permission.deny[0].command.semantic is only supported for command: git, command: aws, command: kubectl, command: gh, or command: helmfile",
 		},
 		{
 			name: "git command with aws semantic fields",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{Service: "sts"}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Service: "sts"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic contains fields not supported for command: git",
+			issue: "permission.deny[0].command.semantic contains fields not supported for command: git",
 		},
 		{
 			name: "aws command with git semantic fields",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Verb: "push"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Verb: "push"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic contains fields not supported for command: aws",
+			issue: "permission.deny[0].command.semantic contains fields not supported for command: aws",
 		},
 		{
 			name: "aws command with kubectl semantic fields",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Namespace: "prod"}},
+				Command: PermissionCommandSpec{Name: "aws", Semantic: &SemanticMatchSpec{Namespace: "prod"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic contains fields not supported for command: aws",
+			issue: "permission.deny[0].command.semantic contains fields not supported for command: aws",
 		},
 		{
 			name: "kubectl command with aws semantic fields",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "kubectl", Semantic: &SemanticMatchSpec{Service: "s3"}},
+				Command: PermissionCommandSpec{Name: "kubectl", Semantic: &SemanticMatchSpec{Service: "s3"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic contains fields not supported for command: kubectl",
-		},
-		{
-			name: "subcommand with semantic verb",
-			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Subcommand: "push", Semantic: &SemanticMatchSpec{Verb: "push"}},
-			}}}},
-			issue: "permission.deny[0].match.subcommand cannot be used with semantic",
+			issue: "permission.deny[0].command.semantic contains fields not supported for command: kubectl",
 		},
 		{
 			name: "git command with gh semantic fields",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{Area: "api"}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Area: "api"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic contains fields not supported for command: git",
+			issue: "permission.deny[0].command.semantic contains fields not supported for command: git",
 		},
 		{
 			name: "gh command with aws semantic fields",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "gh", Semantic: &SemanticMatchSpec{Service: "sts"}},
+				Command: PermissionCommandSpec{Name: "gh", Semantic: &SemanticMatchSpec{Service: "sts"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic contains fields not supported for command: gh",
-		},
-		{
-			name: "gh subcommand with semantic",
-			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "gh", Subcommand: "api", Semantic: &SemanticMatchSpec{Area: "api"}},
-			}}}},
-			issue: "permission.deny[0].match.subcommand cannot be used with semantic",
+			issue: "permission.deny[0].command.semantic contains fields not supported for command: gh",
 		},
 		{
 			name: "git command with helmfile semantic fields",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{Environment: "prod"}},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Environment: "prod"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic contains fields not supported for command: git",
+			issue: "permission.deny[0].command.semantic contains fields not supported for command: git",
 		},
 		{
 			name: "helmfile command with aws semantic fields",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "helmfile", Semantic: &SemanticMatchSpec{Service: "sts"}},
+				Command: PermissionCommandSpec{Name: "helmfile", Semantic: &SemanticMatchSpec{Service: "sts"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic contains fields not supported for command: helmfile",
-		},
-		{
-			name: "helmfile subcommand with semantic",
-			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "helmfile", Subcommand: "sync", Semantic: &SemanticMatchSpec{Verb: "sync"}},
-			}}}},
-			issue: "permission.deny[0].match.subcommand cannot be used with semantic",
+			issue: "permission.deny[0].command.semantic contains fields not supported for command: helmfile",
 		},
 		{
 			name: "rewrite semantic",
@@ -2094,9 +2178,9 @@ func TestValidateSemanticMatchRules(t *testing.T) {
 
 func TestValidateSemanticUnsupportedFieldSuggestsSupportedFields(t *testing.T) {
 	issues := ValidatePipeline(PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
-		Match: MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{Namespace: "prod"}},
+		Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Namespace: "prod"}},
 	}}}})
-	want := "permission.deny[0].match.semantic.namespace is not supported for command git. Supported semantic fields for git:"
+	want := "permission.deny[0].command.semantic.namespace is not supported for command git. Supported semantic fields for git:"
 	for _, issue := range issues {
 		if strings.Contains(issue, want) && strings.Contains(issue, "verb") && strings.Contains(issue, "flags_contains") {
 			return
@@ -2110,7 +2194,7 @@ func TestEvaluateTraceIncludesMatchedRuleSource(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Match: MatchSpec{Command: "git", Subcommand: "status"},
+				Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}},
 			}},
 		},
 	}, src)
@@ -2131,9 +2215,9 @@ func TestEvaluateTraceIncludesMatchedRuleSource(t *testing.T) {
 func BenchmarkEvaluateManyRegexRules(b *testing.B) {
 	rules := make([]PermissionRuleSpec, 0, 250)
 	for i := 0; i < 249; i++ {
-		rules = append(rules, PermissionRuleSpec{Pattern: `^\s*cmd-` + fmtIntForBenchmark(i) + `\s+.*$`})
+		rules = append(rules, PermissionRuleSpec{Patterns: []string{`^\s*cmd-` + fmtIntForBenchmark(i) + `\s+.*$`}})
 	}
-	rules = append(rules, PermissionRuleSpec{Pattern: `^\s*git\s+status\s*$`})
+	rules = append(rules, PermissionRuleSpec{Patterns: []string{`^\s*git\s+status\s*$`}})
 	p := NewPipeline(PipelineSpec{Permission: PermissionSpec{Allow: rules}}, Source{})
 
 	b.ReportAllocs()

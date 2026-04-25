@@ -85,9 +85,13 @@ func TestRunDoctorReportsIncompatibleVerifiedArtifact(t *testing.T) {
 func minimalValidConfig() string {
 	return `permission:
   allow:
-    - match:
-        command: git
-        subcommand: status
+    - command:
+
+        name: git
+
+        semantic:
+
+          verb: status
       test:
         allow:
           - "git status"
