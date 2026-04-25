@@ -347,6 +347,105 @@ func TestPermissionRuleMatchesGitSemantic(t *testing.T) {
 	}
 }
 
+func TestPermissionRuleMatchesAWSSemantic(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		match   MatchSpec
+		want    bool
+	}{
+		{
+			name:    "identity check",
+			command: "aws sts get-caller-identity",
+			match:   MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Service: "sts", Operation: "get-caller-identity"}},
+			want:    true,
+		},
+		{
+			name:    "profile and region",
+			command: "aws --profile prod --region ap-northeast-1 sts get-caller-identity",
+			match:   MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Profile: "prod", Region: "ap-northeast-1"}},
+			want:    true,
+		},
+		{
+			name:    "wrong service operation",
+			command: "aws sts get-caller-identity",
+			match:   MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Service: "s3", Operation: "rm"}},
+			want:    false,
+		},
+		{
+			name:    "dry run unknown does not match true",
+			command: "aws ec2 terminate-instances --instance-ids i-123",
+			match:   MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{DryRun: boolPtr(true)}},
+			want:    false,
+		},
+		{
+			name:    "generic fallback does not satisfy aws semantic",
+			command: "unknown sts get-caller-identity",
+			match:   MatchSpec{Command: "unknown", Semantic: &SemanticMatchSpec{Service: "sts"}},
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.match.MatchMatches(tt.command); got != tt.want {
+				t.Fatalf("MatchMatches(%q)=%v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchSpecAWSSemanticRequiresAWSParserData(t *testing.T) {
+	match := MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Service: "sts"}}
+	cmd := commandpkg.Command{
+		Raw:      "aws sts get-caller-identity",
+		Program:  "aws",
+		RawWords: []string{"sts", "get-caller-identity"},
+		Parser:   "generic",
+	}
+	if match.matches(cmd) {
+		t.Fatal("generic parser command satisfied aws semantic match")
+	}
+}
+
+func TestEvaluateAWSSemanticPermissionOutcomes(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Deny: []PermissionRuleSpec{{
+				Match:   MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Service: "s3", OperationIn: []string{"rm", "rb", "delete-object", "delete-bucket"}}},
+				Message: "destructive S3 operation is blocked",
+			}},
+			Ask: []PermissionRuleSpec{{
+				Match:   MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{ServiceIn: []string{"iam"}}},
+				Message: "AWS control-plane operation requires confirmation",
+			}},
+			Allow: []PermissionRuleSpec{{
+				Match: MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Service: "sts", Operation: "get-caller-identity"}},
+			}},
+		},
+	}, Source{})
+
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{command: "aws sts get-caller-identity", want: "allow"},
+		{command: "aws s3 rm s3://bucket/key", want: "deny"},
+		{command: "aws iam list-roles", want: "ask"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			got, err := Evaluate(p, tt.command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != tt.want {
+				t.Fatalf("Outcome=%q, want %q; decision=%+v", got.Outcome, tt.want, got)
+			}
+		})
+	}
+}
+
 func TestMatchSpecGitSemanticRequiresGitParserData(t *testing.T) {
 	match := MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}
 	cmd := commandpkg.Command{
@@ -420,6 +519,36 @@ func TestEvaluateTraceIncludesSemanticMatcherInfo(t *testing.T) {
 	}
 	if !containsString(last.SemanticFields, "verb") || !containsString(last.SemanticFields, "force") {
 		t.Fatalf("SemanticFields=%#v, want verb and force", last.SemanticFields)
+	}
+}
+
+func TestEvaluateTraceIncludesAWSSemanticInfo(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Match: MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Service: "sts", Operation: "get-caller-identity", Profile: "prod", Region: "ap-northeast-1"}},
+			}},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "aws --profile prod --region ap-northeast-1 sts get-caller-identity")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if len(got.Trace) == 0 {
+		t.Fatalf("trace empty")
+	}
+	last := got.Trace[len(got.Trace)-1]
+	if last.Parser != "aws" || last.SemanticParser != "aws" || !last.SemanticMatch {
+		t.Fatalf("trace step missing parser/semantic info: %+v", last)
+	}
+	if last.AWSService != "sts" || last.AWSOperation != "get-caller-identity" || last.AWSProfile != "prod" || last.AWSRegion != "ap-northeast-1" {
+		t.Fatalf("trace step missing aws semantic info: %+v", last)
+	}
+	for _, field := range []string{"service", "operation", "profile", "region"} {
+		if !containsString(last.SemanticFields, field) {
+			t.Fatalf("SemanticFields=%#v, want %q", last.SemanticFields, field)
+		}
 	}
 }
 
@@ -1397,14 +1526,28 @@ func TestValidateSemanticMatchRules(t *testing.T) {
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
 				Match: MatchSpec{Command: "ls", Semantic: &SemanticMatchSpec{Verb: "push"}},
 			}}}},
-			issue: "permission.deny[0].match.semantic is only supported for command: git",
+			issue: "permission.deny[0].match.semantic is only supported for command: git or command: aws",
+		},
+		{
+			name: "git command with aws semantic fields",
+			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
+				Match: MatchSpec{Command: "git", Semantic: &SemanticMatchSpec{Service: "sts"}},
+			}}}},
+			issue: "permission.deny[0].match.semantic contains fields not supported for command: git",
+		},
+		{
+			name: "aws command with git semantic fields",
+			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
+				Match: MatchSpec{Command: "aws", Semantic: &SemanticMatchSpec{Verb: "push"}},
+			}}}},
+			issue: "permission.deny[0].match.semantic contains fields not supported for command: aws",
 		},
 		{
 			name: "subcommand with semantic verb",
 			spec: PipelineSpec{Permission: PermissionSpec{Deny: []PermissionRuleSpec{{
 				Match: MatchSpec{Command: "git", Subcommand: "push", Semantic: &SemanticMatchSpec{Verb: "push"}},
 			}}}},
-			issue: "permission.deny[0].match.subcommand cannot be used with semantic.verb",
+			issue: "permission.deny[0].match.subcommand cannot be used with semantic",
 		},
 		{
 			name: "rewrite semantic",

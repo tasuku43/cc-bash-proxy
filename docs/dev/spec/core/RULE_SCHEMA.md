@@ -225,6 +225,8 @@ Structured permission `match` may include `semantic` only when `match.command`
 is an exact command discriminator. `command_in` plus `semantic` is invalid
 because the semantic schema would be ambiguous. `semantic` is an internal member
 of `match`; it cannot be combined with top-level `pattern` or `patterns`.
+Do not nest another command key under `semantic`: `semantic.service` is valid
+for AWS rules, while `semantic.aws.service` is invalid.
 
 For `command: git`, the Git semantic schema is:
 
@@ -252,10 +254,45 @@ Git semantic parsing is best-effort static parsing of the command argv. It
 does not query repository state; ambiguous operands are left conservative or
 classified by common CLI convention. `GenericParser` never satisfies
 `match.semantic`, so a command-specific parser must provide semantic data.
-Unsupported semantic fields, unsupported value types, `semantic` without
-`command`, non-Git commands using Git fields, and rewrite selectors with
-`semantic` are validation errors. Future commands such as `kubectl`, `aws`, or
-`gh` must add their own command-specific semantic schema and verification.
+
+For `command: aws`, the AWS semantic schema is:
+
+- string selectors: `service`, `operation`, `profile`, `region`,
+  `endpoint_url`, `endpoint_url_prefix`
+- string-list selectors: `service_in`, `operation_in`, `profile_in`,
+  `region_in`
+- boolean selectors: `dry_run`, `no_cli_pager`
+- flag selectors: `flags_contains`, `flags_prefixes`
+
+Example:
+
+```yaml
+deny:
+  - match:
+      command: aws
+      semantic:
+        service: s3
+        operation_in:
+          - rm
+          - rb
+          - delete-object
+          - delete-bucket
+    message: "destructive S3 operation is blocked"
+```
+
+AWS semantic parsing statically reads commands shaped as
+`aws [global options] <service> <operation> [operation options / args]`. Global
+options are parsed before the service. `--profile` overrides `AWS_PROFILE`.
+`--region` overrides `AWS_REGION`, and `AWS_REGION` overrides
+`AWS_DEFAULT_REGION`. `--dry-run` sets `dry_run` to true; `--no-dry-run` sets it
+to false. If neither flag is present, `dry_run` is unknown, and `dry_run: false`
+does not match that unknown state.
+
+Unsupported semantic fields, unsupported value types, `semantic` without exact
+`command`, `command_in` with `semantic`, `subcommand` with `semantic`, command
+and semantic schema mismatches, and rewrite selectors with `semantic` are
+validation errors. Future commands such as `kubectl` or `gh` must add their own
+command-specific semantic schema and verification.
 
 For `permission.allow`, `pattern` and `patterns` fail closed to `ask` unless
 the command is safe for evaluation. Syntax parse errors, diagnostics, unknown

@@ -193,11 +193,12 @@ the raw command; use structured `match` rules for normal allow cases.
 
 Structured permission `match` supports command-specific semantic matching. The
 `match.command` value is the discriminator for the `semantic` schema; do not
-nest another command key under `semantic`. Today only `command: git` has a
-semantic schema. Git semantic matching is best-effort static parsing from the
-argv, is not attempted by the `GenericParser` fallback, and unsupported fields
-or value types fail during `verify`. Semantic matching is permission-only and
-cannot be used in rewrite selectors or with raw `pattern` / `patterns`.
+nest another command key under `semantic`; for example, use `semantic.service`,
+not `semantic.aws.service`. Today `command: git` and `command: aws` have
+semantic schemas. Semantic matching is best-effort static parsing from argv, is
+not attempted by the `GenericParser` fallback, and unsupported fields or value
+types fail during `verify`. Semantic matching is permission-only and cannot be
+used in rewrite selectors or with raw `pattern` / `patterns`.
 
 ```yaml
 permission:
@@ -214,6 +215,28 @@ permission:
         command: git
         semantic:
           verb_in: [status, diff, log, show, branch]
+
+    - match:
+        command: aws
+        semantic:
+          service: sts
+          operation: get-caller-identity
+      message: "allow AWS identity check"
+
+  ask:
+    - match:
+        command: aws
+        semantic:
+          service_in: [iam, eks, ecs, lambda]
+      message: "AWS control-plane operation requires confirmation"
+
+  deny:
+    - match:
+        command: aws
+        semantic:
+          service: s3
+          operation_in: [rm, rb, delete-object, delete-bucket]
+      message: "destructive S3 operation is blocked"
 ```
 
 Fail-closed means `allow` rules are ignored when parsing or shell-shape analysis
@@ -457,9 +480,22 @@ semantic positional argument.
 For `command: git`, `match.semantic` may use `verb`, `verb_in`, `remote`,
 `remote_in`, `branch`, `branch_in`, `ref`, `ref_in`, boolean fields `force`,
 `hard`, `recursive`, `include_ignored`, `cached`, `staged`, plus
-`flags_contains` and `flags_prefixes`. `semantic` requires exact
-`match.command`; `command_in` with `semantic` is invalid. Future semantic
-support will add a separate command-specific schema for each command.
+`flags_contains` and `flags_prefixes`.
+
+For `command: aws`, `match.semantic` may use `service`, `service_in`,
+`operation`, `operation_in`, `profile`, `profile_in`, `region`, `region_in`,
+`endpoint_url`, `endpoint_url_prefix`, boolean fields `dry_run` and
+`no_cli_pager`, plus `flags_contains` and `flags_prefixes`. The AWS parser
+reads `aws [global options] <service> <operation> ...`. `--profile` overrides
+`AWS_PROFILE`; `--region` overrides `AWS_REGION`, which overrides
+`AWS_DEFAULT_REGION`. `dry_run` is known only when `--dry-run` or
+`--no-dry-run` is present, so `dry_run: false` matches only explicit
+`--no-dry-run`; unknown is not treated as false.
+
+`semantic` requires exact `match.command`; `command_in` with `semantic` is
+invalid. `subcommand` with `semantic` is invalid because command-specific
+semantic fields are more precise. Future semantic support will add a separate
+command-specific schema for each command.
 
 ## Current Design
 

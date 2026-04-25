@@ -100,22 +100,34 @@ type MatchSpec struct {
 }
 
 type SemanticMatchSpec struct {
-	Verb           string   `yaml:"verb" json:"verb,omitempty"`
-	VerbIn         []string `yaml:"verb_in" json:"verb_in,omitempty"`
-	Remote         string   `yaml:"remote" json:"remote,omitempty"`
-	RemoteIn       []string `yaml:"remote_in" json:"remote_in,omitempty"`
-	Branch         string   `yaml:"branch" json:"branch,omitempty"`
-	BranchIn       []string `yaml:"branch_in" json:"branch_in,omitempty"`
-	Ref            string   `yaml:"ref" json:"ref,omitempty"`
-	RefIn          []string `yaml:"ref_in" json:"ref_in,omitempty"`
-	Force          *bool    `yaml:"force" json:"force,omitempty"`
-	Hard           *bool    `yaml:"hard" json:"hard,omitempty"`
-	Recursive      *bool    `yaml:"recursive" json:"recursive,omitempty"`
-	IncludeIgnored *bool    `yaml:"include_ignored" json:"include_ignored,omitempty"`
-	Cached         *bool    `yaml:"cached" json:"cached,omitempty"`
-	Staged         *bool    `yaml:"staged" json:"staged,omitempty"`
-	FlagsContains  []string `yaml:"flags_contains" json:"flags_contains,omitempty"`
-	FlagsPrefixes  []string `yaml:"flags_prefixes" json:"flags_prefixes,omitempty"`
+	Verb              string   `yaml:"verb" json:"verb,omitempty"`
+	VerbIn            []string `yaml:"verb_in" json:"verb_in,omitempty"`
+	Remote            string   `yaml:"remote" json:"remote,omitempty"`
+	RemoteIn          []string `yaml:"remote_in" json:"remote_in,omitempty"`
+	Branch            string   `yaml:"branch" json:"branch,omitempty"`
+	BranchIn          []string `yaml:"branch_in" json:"branch_in,omitempty"`
+	Ref               string   `yaml:"ref" json:"ref,omitempty"`
+	RefIn             []string `yaml:"ref_in" json:"ref_in,omitempty"`
+	Force             *bool    `yaml:"force" json:"force,omitempty"`
+	Hard              *bool    `yaml:"hard" json:"hard,omitempty"`
+	Recursive         *bool    `yaml:"recursive" json:"recursive,omitempty"`
+	IncludeIgnored    *bool    `yaml:"include_ignored" json:"include_ignored,omitempty"`
+	Cached            *bool    `yaml:"cached" json:"cached,omitempty"`
+	Staged            *bool    `yaml:"staged" json:"staged,omitempty"`
+	FlagsContains     []string `yaml:"flags_contains" json:"flags_contains,omitempty"`
+	FlagsPrefixes     []string `yaml:"flags_prefixes" json:"flags_prefixes,omitempty"`
+	Service           string   `yaml:"service" json:"service,omitempty"`
+	ServiceIn         []string `yaml:"service_in" json:"service_in,omitempty"`
+	Operation         string   `yaml:"operation" json:"operation,omitempty"`
+	OperationIn       []string `yaml:"operation_in" json:"operation_in,omitempty"`
+	Profile           string   `yaml:"profile" json:"profile,omitempty"`
+	ProfileIn         []string `yaml:"profile_in" json:"profile_in,omitempty"`
+	Region            string   `yaml:"region" json:"region,omitempty"`
+	RegionIn          []string `yaml:"region_in" json:"region_in,omitempty"`
+	EndpointURL       string   `yaml:"endpoint_url" json:"endpoint_url,omitempty"`
+	EndpointURLPrefix string   `yaml:"endpoint_url_prefix" json:"endpoint_url_prefix,omitempty"`
+	DryRun            *bool    `yaml:"dry_run" json:"dry_run,omitempty"`
+	NoCLIPager        *bool    `yaml:"no_cli_pager" json:"no_cli_pager,omitempty"`
 }
 
 type Source struct {
@@ -162,6 +174,10 @@ type TraceStep struct {
 	SemanticParser string   `json:"semantic_parser,omitempty"`
 	SemanticMatch  bool     `json:"semantic_match,omitempty"`
 	SemanticFields []string `json:"semantic_fields,omitempty"`
+	AWSService     string   `json:"aws_service,omitempty"`
+	AWSOperation   string   `json:"aws_operation,omitempty"`
+	AWSProfile     string   `json:"aws_profile,omitempty"`
+	AWSRegion      string   `json:"aws_region,omitempty"`
 	FromShape      string   `json:"from_shape,omitempty"`
 	FromShapeFlags []string `json:"from_shape_flags,omitempty"`
 	FromSafe       *bool    `json:"from_safe,omitempty"`
@@ -469,6 +485,12 @@ func permissionTraceStepForCommand(effect string, ruleType string, rule Permissi
 	step := permissionTraceStep(effect, ruleType, rule)
 	step.Parser = cmd.Parser
 	step.SemanticParser = cmd.SemanticParser
+	if cmd.AWS != nil {
+		step.AWSService = cmd.AWS.Service
+		step.AWSOperation = cmd.AWS.Operation
+		step.AWSProfile = cmd.AWS.Profile
+		step.AWSRegion = cmd.AWS.Region
+	}
 	if rule.Match.Semantic != nil {
 		step.SemanticMatch = true
 		step.SemanticFields = rule.Match.Semantic.fieldsUsed()
@@ -696,6 +718,10 @@ func compositionTrace(plan commandpkg.CommandPlan, decisions []commandDecision, 
 			CommandIndex:   &index,
 			Parser:         cmd.Parser,
 			SemanticParser: cmd.SemanticParser,
+			AWSService:     awsTraceService(cmd),
+			AWSOperation:   awsTraceOperation(cmd),
+			AWSProfile:     awsTraceProfile(cmd),
+			AWSRegion:      awsTraceRegion(cmd),
 			Program:        cmd.Program,
 			ActionPath:     append([]string(nil), cmd.ActionPath...),
 			Source:         sourcePtr(commandDecision.Rule.Source),
@@ -713,6 +739,34 @@ func compositionTrace(plan commandpkg.CommandPlan, decisions []commandDecision, 
 		Source:     sourcePtr(decision.Source),
 	})
 	return trace
+}
+
+func awsTraceService(cmd commandpkg.Command) string {
+	if cmd.AWS == nil {
+		return ""
+	}
+	return cmd.AWS.Service
+}
+
+func awsTraceOperation(cmd commandpkg.Command) string {
+	if cmd.AWS == nil {
+		return ""
+	}
+	return cmd.AWS.Operation
+}
+
+func awsTraceProfile(cmd commandpkg.Command) string {
+	if cmd.AWS == nil {
+		return ""
+	}
+	return cmd.AWS.Profile
+}
+
+func awsTraceRegion(cmd commandpkg.Command) string {
+	if cmd.AWS == nil {
+		return ""
+	}
+	return cmd.AWS.Region
 }
 
 func firstPreparedCommandMatch(rules []preparedPermissionRule, cmd commandpkg.Command) (PermissionRuleSpec, bool) {
@@ -981,8 +1035,19 @@ func (m MatchSpec) matches(cmd commandpkg.Command) bool {
 			return false
 		}
 	}
-	if m.Semantic != nil && !m.Semantic.matchesGit(cmd) {
-		return false
+	if m.Semantic != nil {
+		switch m.Command {
+		case "git":
+			if !m.Semantic.matchesGit(cmd) {
+				return false
+			}
+		case "aws":
+			if !m.Semantic.matchesAWS(cmd) {
+				return false
+			}
+		default:
+			return false
+		}
 	}
 	return true
 }
@@ -1047,6 +1112,64 @@ func (s SemanticMatchSpec) matchesGit(cmd commandpkg.Command) bool {
 	return true
 }
 
+func (s SemanticMatchSpec) matchesAWS(cmd commandpkg.Command) bool {
+	if cmd.SemanticParser != "aws" || cmd.AWS == nil {
+		return false
+	}
+	aws := cmd.AWS
+	if s.Service != "" && aws.Service != s.Service {
+		return false
+	}
+	if len(s.ServiceIn) > 0 && !containsString(s.ServiceIn, aws.Service) {
+		return false
+	}
+	if s.Operation != "" && aws.Operation != s.Operation {
+		return false
+	}
+	if len(s.OperationIn) > 0 && !containsString(s.OperationIn, aws.Operation) {
+		return false
+	}
+	if s.Profile != "" && aws.Profile != s.Profile {
+		return false
+	}
+	if len(s.ProfileIn) > 0 && !containsString(s.ProfileIn, aws.Profile) {
+		return false
+	}
+	if s.Region != "" && aws.Region != s.Region {
+		return false
+	}
+	if len(s.RegionIn) > 0 && !containsString(s.RegionIn, aws.Region) {
+		return false
+	}
+	if s.EndpointURL != "" && aws.EndpointURL != s.EndpointURL {
+		return false
+	}
+	if s.EndpointURLPrefix != "" && !strings.HasPrefix(aws.EndpointURL, s.EndpointURLPrefix) {
+		return false
+	}
+	if s.DryRun != nil {
+		if aws.DryRun == nil || *aws.DryRun != *s.DryRun {
+			return false
+		}
+	}
+	if s.NoCLIPager != nil {
+		if aws.NoCLIPager == nil || *aws.NoCLIPager != *s.NoCLIPager {
+			return false
+		}
+	}
+	for _, flag := range s.FlagsContains {
+		if !containsString(aws.Flags, flag) {
+			return false
+		}
+	}
+	for _, prefix := range s.FlagsPrefixes {
+		if !containsPrefix(aws.Flags, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s SemanticMatchSpec) fieldsUsed() []string {
 	var fields []string
 	if s.Verb != "" {
@@ -1096,6 +1219,42 @@ func (s SemanticMatchSpec) fieldsUsed() []string {
 	}
 	if len(s.FlagsPrefixes) > 0 {
 		fields = append(fields, "flags_prefixes")
+	}
+	if s.Service != "" {
+		fields = append(fields, "service")
+	}
+	if len(s.ServiceIn) > 0 {
+		fields = append(fields, "service_in")
+	}
+	if s.Operation != "" {
+		fields = append(fields, "operation")
+	}
+	if len(s.OperationIn) > 0 {
+		fields = append(fields, "operation_in")
+	}
+	if s.Profile != "" {
+		fields = append(fields, "profile")
+	}
+	if len(s.ProfileIn) > 0 {
+		fields = append(fields, "profile_in")
+	}
+	if s.Region != "" {
+		fields = append(fields, "region")
+	}
+	if len(s.RegionIn) > 0 {
+		fields = append(fields, "region_in")
+	}
+	if s.EndpointURL != "" {
+		fields = append(fields, "endpoint_url")
+	}
+	if s.EndpointURLPrefix != "" {
+		fields = append(fields, "endpoint_url_prefix")
+	}
+	if s.DryRun != nil {
+		fields = append(fields, "dry_run")
+	}
+	if s.NoCLIPager != nil {
+		fields = append(fields, "no_cli_pager")
 	}
 	return fields
 }
@@ -1264,13 +1423,24 @@ func validateMatchSpec(prefix string, match MatchSpec, allowSemantic bool) []str
 		if len(match.CommandIn) > 0 {
 			issues = append(issues, prefix+".command_in cannot be used with semantic")
 		}
-		if match.Command != "" && match.Command != "git" {
-			issues = append(issues, prefix+".semantic is only supported for command: git")
-		}
 		if match.Subcommand != "" {
-			issues = append(issues, prefix+".subcommand cannot be used with semantic.verb")
+			issues = append(issues, prefix+".subcommand cannot be used with semantic")
 		}
-		issues = append(issues, ValidateGitSemanticMatchSpec(prefix+".semantic", *match.Semantic)...)
+		switch match.Command {
+		case "git":
+			if hasAWSSemanticFields(*match.Semantic) {
+				issues = append(issues, prefix+".semantic contains fields not supported for command: git")
+			}
+			issues = append(issues, ValidateGitSemanticMatchSpec(prefix+".semantic", *match.Semantic)...)
+		case "aws":
+			if hasGitSemanticFields(*match.Semantic) {
+				issues = append(issues, prefix+".semantic contains fields not supported for command: aws")
+			}
+			issues = append(issues, ValidateAWSSemanticMatchSpec(prefix+".semantic", *match.Semantic)...)
+		case "":
+		default:
+			issues = append(issues, prefix+".semantic is only supported for command: git or command: aws")
+		}
 	}
 	return issues
 }
@@ -1296,6 +1466,38 @@ func ValidateGitSemanticMatchSpec(prefix string, semantic SemanticMatchSpec) []s
 	issues = append(issues, validateNonEmptyStrings(prefix+".remote_in", semantic.RemoteIn)...)
 	issues = append(issues, validateNonEmptyStrings(prefix+".branch_in", semantic.BranchIn)...)
 	issues = append(issues, validateNonEmptyStrings(prefix+".ref_in", semantic.RefIn)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".flags_contains", semantic.FlagsContains)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".flags_prefixes", semantic.FlagsPrefixes)...)
+	return issues
+}
+
+func ValidateAWSSemanticMatchSpec(prefix string, semantic SemanticMatchSpec) []string {
+	var issues []string
+	if IsZeroSemanticMatchSpec(semantic) {
+		issues = append(issues, prefix+" must not be empty")
+	}
+	if strings.TrimSpace(semantic.Service) == "" && semantic.Service != "" {
+		issues = append(issues, prefix+".service must be non-empty")
+	}
+	if strings.TrimSpace(semantic.Operation) == "" && semantic.Operation != "" {
+		issues = append(issues, prefix+".operation must be non-empty")
+	}
+	if strings.TrimSpace(semantic.Profile) == "" && semantic.Profile != "" {
+		issues = append(issues, prefix+".profile must be non-empty")
+	}
+	if strings.TrimSpace(semantic.Region) == "" && semantic.Region != "" {
+		issues = append(issues, prefix+".region must be non-empty")
+	}
+	if strings.TrimSpace(semantic.EndpointURL) == "" && semantic.EndpointURL != "" {
+		issues = append(issues, prefix+".endpoint_url must be non-empty")
+	}
+	if strings.TrimSpace(semantic.EndpointURLPrefix) == "" && semantic.EndpointURLPrefix != "" {
+		issues = append(issues, prefix+".endpoint_url_prefix must be non-empty")
+	}
+	issues = append(issues, validateNonEmptyStrings(prefix+".service_in", semantic.ServiceIn)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".operation_in", semantic.OperationIn)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".profile_in", semantic.ProfileIn)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".region_in", semantic.RegionIn)...)
 	issues = append(issues, validateNonEmptyStrings(prefix+".flags_contains", semantic.FlagsContains)...)
 	issues = append(issues, validateNonEmptyStrings(prefix+".flags_prefixes", semantic.FlagsPrefixes)...)
 	return issues
@@ -1411,22 +1613,41 @@ func IsZeroMatchSpec(match MatchSpec) bool {
 }
 
 func IsZeroSemanticMatchSpec(semantic SemanticMatchSpec) bool {
-	return semantic.Verb == "" &&
-		len(semantic.VerbIn) == 0 &&
-		semantic.Remote == "" &&
-		len(semantic.RemoteIn) == 0 &&
-		semantic.Branch == "" &&
-		len(semantic.BranchIn) == 0 &&
-		semantic.Ref == "" &&
-		len(semantic.RefIn) == 0 &&
-		semantic.Force == nil &&
-		semantic.Hard == nil &&
-		semantic.Recursive == nil &&
-		semantic.IncludeIgnored == nil &&
-		semantic.Cached == nil &&
-		semantic.Staged == nil &&
+	return !hasGitSemanticFields(semantic) && !hasAWSSemanticFields(semantic) &&
 		len(semantic.FlagsContains) == 0 &&
 		len(semantic.FlagsPrefixes) == 0
+}
+
+func hasGitSemanticFields(semantic SemanticMatchSpec) bool {
+	return semantic.Verb != "" ||
+		len(semantic.VerbIn) > 0 ||
+		semantic.Remote != "" ||
+		len(semantic.RemoteIn) > 0 ||
+		semantic.Branch != "" ||
+		len(semantic.BranchIn) > 0 ||
+		semantic.Ref != "" ||
+		len(semantic.RefIn) > 0 ||
+		semantic.Force != nil ||
+		semantic.Hard != nil ||
+		semantic.Recursive != nil ||
+		semantic.IncludeIgnored != nil ||
+		semantic.Cached != nil ||
+		semantic.Staged != nil
+}
+
+func hasAWSSemanticFields(semantic SemanticMatchSpec) bool {
+	return semantic.Service != "" ||
+		len(semantic.ServiceIn) > 0 ||
+		semantic.Operation != "" ||
+		len(semantic.OperationIn) > 0 ||
+		semantic.Profile != "" ||
+		len(semantic.ProfileIn) > 0 ||
+		semantic.Region != "" ||
+		len(semantic.RegionIn) > 0 ||
+		semantic.EndpointURL != "" ||
+		semantic.EndpointURLPrefix != "" ||
+		semantic.DryRun != nil ||
+		semantic.NoCLIPager != nil
 }
 
 func IsZeroMoveFlagToEnvSpec(spec MoveFlagToEnvSpec) bool {

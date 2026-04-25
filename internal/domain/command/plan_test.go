@@ -73,6 +73,73 @@ func TestGitParserBuildsSemanticFields(t *testing.T) {
 	}
 }
 
+func TestAwsParserBuildsSemanticFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		want       AWSSemantic
+		wantDryRun *bool
+	}{
+		{
+			name: "sts identity",
+			raw:  "aws sts get-caller-identity",
+			want: AWSSemantic{Service: "sts", Operation: "get-caller-identity"},
+		},
+		{
+			name: "profile and region flags",
+			raw:  "aws --profile prod --region ap-northeast-1 sts get-caller-identity",
+			want: AWSSemantic{Service: "sts", Operation: "get-caller-identity", Profile: "prod", Region: "ap-northeast-1", RegionSource: "cli"},
+		},
+		{
+			name: "profile and region env",
+			raw:  "AWS_PROFILE=prod AWS_REGION=ap-northeast-1 aws sts get-caller-identity",
+			want: AWSSemantic{Service: "sts", Operation: "get-caller-identity", Profile: "prod", Region: "ap-northeast-1", RegionSource: "AWS_REGION"},
+		},
+		{
+			name: "s3 rm",
+			raw:  "aws s3 rm s3://bucket/key",
+			want: AWSSemantic{Service: "s3", Operation: "rm"},
+		},
+		{
+			name: "s3api delete object",
+			raw:  "aws s3api delete-object --bucket b --key k",
+			want: AWSSemantic{Service: "s3api", Operation: "delete-object"},
+		},
+		{
+			name:       "ec2 dry run",
+			raw:        "aws ec2 terminate-instances --instance-ids i-123 --dry-run",
+			want:       AWSSemantic{Service: "ec2", Operation: "terminate-instances"},
+			wantDryRun: commandBoolPtr(true),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := Parse(tt.raw)
+			if len(plan.Commands) != 1 {
+				t.Fatalf("len(Commands)=%d", len(plan.Commands))
+			}
+			got := plan.Commands[0].AWS
+			if got == nil {
+				t.Fatalf("AWS semantic = nil")
+			}
+			if got.Service != tt.want.Service || got.Operation != tt.want.Operation || got.Profile != tt.want.Profile ||
+				got.Region != tt.want.Region || got.RegionSource != tt.want.RegionSource {
+				t.Fatalf("AWS semantic = %+v, want %+v", *got, tt.want)
+			}
+			if tt.wantDryRun != nil {
+				if got.DryRun == nil || *got.DryRun != *tt.wantDryRun {
+					t.Fatalf("DryRun=%v, want %v", got.DryRun, *tt.wantDryRun)
+				}
+			}
+		})
+	}
+}
+
+func commandBoolPtr(v bool) *bool {
+	return &v
+}
+
 func TestParseCommandPlanAndListExtractsCommandsButFailsClosed(t *testing.T) {
 	plan := Parse("git status && git diff")
 

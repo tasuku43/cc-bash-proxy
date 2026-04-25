@@ -389,6 +389,58 @@ test:
 `,
 			want: "cannot unmarshal !!str `true` into bool",
 		},
+		{
+			name: "unknown aws semantic field",
+			body: `permission:
+  deny:
+    - match:
+        command: aws
+        semantic:
+          namespace: prod
+      test:
+        deny: ["aws sts get-caller-identity"]
+        pass: ["aws s3 ls"]
+test:
+  - in: "aws sts get-caller-identity"
+    decision: deny
+`,
+			want: "field namespace not found",
+		},
+		{
+			name: "unsupported aws semantic type",
+			body: `permission:
+  deny:
+    - match:
+        command: aws
+        semantic:
+          dry_run: "false"
+      test:
+        deny: ["aws ec2 terminate-instances --no-dry-run"]
+        pass: ["aws ec2 describe-instances"]
+test:
+  - in: "aws ec2 terminate-instances --no-dry-run"
+    decision: deny
+`,
+			want: "cannot unmarshal !!str `false` into bool",
+		},
+		{
+			name: "nested aws semantic key",
+			body: `permission:
+  deny:
+    - match:
+        command: aws
+        semantic:
+          aws:
+            service: sts
+      test:
+        deny: ["aws sts get-caller-identity"]
+        pass: ["aws s3 ls"]
+test:
+  - in: "aws sts get-caller-identity"
+    decision: deny
+`,
+			want: "field aws not found",
+		},
 	}
 
 	for _, tt := range tests {

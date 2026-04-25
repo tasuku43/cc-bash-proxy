@@ -28,6 +28,7 @@ type Command struct {
 	ResourceName     string
 	SemanticParser   string
 	Git              *GitSemantic
+	AWS              *AWSSemantic
 }
 
 type Option struct {
@@ -49,6 +50,19 @@ type GitSemantic struct {
 	Cached         bool
 	Staged         bool
 	Flags          []string
+}
+
+type AWSSemantic struct {
+	Service         string
+	Operation       string
+	Profile         string
+	Region          string
+	EndpointURL     string
+	DryRun          *bool
+	NoCLIPager      *bool
+	Flags           []string
+	ProfileConflict bool
+	RegionSource    string
 }
 
 func (c Command) HasOption(name string) bool {
