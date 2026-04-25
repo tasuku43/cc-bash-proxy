@@ -187,13 +187,13 @@ func TestGenericParserDoesNotInferOptionValueArity(t *testing.T) {
 	if !ok {
 		t.Fatal("GenericParser.Parse() ok = false, want true")
 	}
-	if len(cmd.GlobalOptions) != 1 || cmd.GlobalOptions[0] != "--profile" {
+	if len(cmd.GlobalOptions) != 1 || cmd.GlobalOptions[0] != (Option{Name: "--profile", Position: 0}) {
 		t.Fatalf("GlobalOptions = %#v, want [--profile]", cmd.GlobalOptions)
 	}
 	if len(cmd.ActionPath) != 2 || cmd.ActionPath[0] != "dev" || cmd.ActionPath[1] != "status" {
 		t.Fatalf("ActionPath = %#v, want [dev status]", cmd.ActionPath)
 	}
-	if len(cmd.Options) != 1 || cmd.Options[0] != "--verbose" {
+	if len(cmd.Options) != 1 || cmd.Options[0] != (Option{Name: "--verbose", Position: 3}) {
 		t.Fatalf("Options = %#v, want [--verbose]", cmd.Options)
 	}
 }

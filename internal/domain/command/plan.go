@@ -12,15 +12,57 @@ type Command struct {
 	Program          string
 	ProgramToken     string
 	Env              map[string]string
-	GlobalOptions    []string
+	GlobalOptions    []Option
 	ActionPath       []string
-	Options          []string
+	Options          []Option
 	Args             []string
 	WorkingDirectory string
 	Namespace        string
 	ResourceType     string
 	ResourceName     string
 	Parser           string
+}
+
+type Option struct {
+	Name     string
+	Value    string
+	HasValue bool
+	Position int
+}
+
+func (c Command) HasOption(name string) bool {
+	return hasOption(c.Options, name)
+}
+
+func (c Command) OptionValues(name string) []string {
+	return optionValues(c.Options, name)
+}
+
+func (c Command) HasGlobalOption(name string) bool {
+	return hasOption(c.GlobalOptions, name)
+}
+
+func (c Command) GlobalOptionValues(name string) []string {
+	return optionValues(c.GlobalOptions, name)
+}
+
+func hasOption(options []Option, name string) bool {
+	for _, option := range options {
+		if option.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func optionValues(options []Option, name string) []string {
+	var values []string
+	for _, option := range options {
+		if option.Name == name && option.HasValue {
+			values = append(values, option.Value)
+		}
+	}
+	return values
 }
 
 type CommandPlan struct {

@@ -32,7 +32,7 @@ func (GitParser) Parse(inv Invocation) (Command, bool) {
 				return cmd, true
 			}
 			value := inv.Words[i+1]
-			cmd.GlobalOptions = append(cmd.GlobalOptions, "-C="+value)
+			cmd.GlobalOptions = append(cmd.GlobalOptions, Option{Name: "-C", Value: value, HasValue: true, Position: i})
 			cmd.WorkingDirectory = value
 			i += 2
 		case word == "-c":
@@ -40,7 +40,7 @@ func (GitParser) Parse(inv Invocation) (Command, bool) {
 				cmd.ActionPath = append(cmd.ActionPath, inv.Words[i:]...)
 				return cmd, true
 			}
-			cmd.GlobalOptions = append(cmd.GlobalOptions, "-c="+inv.Words[i+1])
+			cmd.GlobalOptions = append(cmd.GlobalOptions, Option{Name: "-c", Value: inv.Words[i+1], HasValue: true, Position: i})
 			i += 2
 		case isGitGlobalOptionWithValue(word, "--git-dir"):
 			value, consumed := gitOptionValue(word, "--git-dir", inv.Words, i)
@@ -48,7 +48,7 @@ func (GitParser) Parse(inv Invocation) (Command, bool) {
 				cmd.ActionPath = append(cmd.ActionPath, inv.Words[i:]...)
 				return cmd, true
 			}
-			cmd.GlobalOptions = append(cmd.GlobalOptions, "--git-dir="+value)
+			cmd.GlobalOptions = append(cmd.GlobalOptions, Option{Name: "--git-dir", Value: value, HasValue: true, Position: i})
 			i += gitConsumedWords(word)
 		case isGitGlobalOptionWithValue(word, "--work-tree"):
 			value, consumed := gitOptionValue(word, "--work-tree", inv.Words, i)
@@ -56,7 +56,7 @@ func (GitParser) Parse(inv Invocation) (Command, bool) {
 				cmd.ActionPath = append(cmd.ActionPath, inv.Words[i:]...)
 				return cmd, true
 			}
-			cmd.GlobalOptions = append(cmd.GlobalOptions, "--work-tree="+value)
+			cmd.GlobalOptions = append(cmd.GlobalOptions, Option{Name: "--work-tree", Value: value, HasValue: true, Position: i})
 			i += gitConsumedWords(word)
 		case isGitGlobalOptionWithValue(word, "--namespace"):
 			value, consumed := gitOptionValue(word, "--namespace", inv.Words, i)
@@ -64,13 +64,13 @@ func (GitParser) Parse(inv Invocation) (Command, bool) {
 				cmd.ActionPath = append(cmd.ActionPath, inv.Words[i:]...)
 				return cmd, true
 			}
-			cmd.GlobalOptions = append(cmd.GlobalOptions, "--namespace="+value)
+			cmd.GlobalOptions = append(cmd.GlobalOptions, Option{Name: "--namespace", Value: value, HasValue: true, Position: i})
 			i += gitConsumedWords(word)
 		case word == "--no-pager" || word == "--bare":
-			cmd.GlobalOptions = append(cmd.GlobalOptions, word)
+			cmd.GlobalOptions = append(cmd.GlobalOptions, Option{Name: word, Position: i})
 			i++
 		default:
-			cmd.ActionPath, cmd.Options = splitGitAction(inv.Words[i:])
+			cmd.ActionPath, cmd.Options = splitGitAction(inv.Words[i:], i)
 			return cmd, true
 		}
 	}
@@ -99,18 +99,15 @@ func gitConsumedWords(word string) int {
 	return 2
 }
 
-func splitGitAction(words []string) ([]string, []string) {
+func splitGitAction(words []string, startPosition int) ([]string, []Option) {
 	actionPath := []string{}
-	options := []string{}
+	var options []Option
 	for i, word := range words {
 		if i > 0 && strings.HasPrefix(word, "-") && word != "-" {
-			options = append(options, word)
+			options = append(options, parseOptionWord(word, startPosition+i))
 			continue
 		}
 		actionPath = append(actionPath, word)
-	}
-	if len(options) == 0 {
-		options = nil
 	}
 	return actionPath, options
 }

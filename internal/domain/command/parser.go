@@ -91,18 +91,18 @@ func (GenericParser) Parse(inv Invocation) (Command, bool) {
 	}, true
 }
 
-func splitGenericWords(words []string) ([]string, []string, []string) {
-	globalOptions := []string{}
+func splitGenericWords(words []string) ([]Option, []string, []Option) {
+	var globalOptions []Option
 	actionPath := []string{}
-	options := []string{}
+	var options []Option
 	seenAction := false
 
-	for _, word := range words {
+	for i, word := range words {
 		if strings.HasPrefix(word, "-") && word != "-" {
 			if seenAction {
-				options = append(options, word)
+				options = append(options, parseOptionWord(word, i))
 			} else {
-				globalOptions = append(globalOptions, word)
+				globalOptions = append(globalOptions, parseOptionWord(word, i))
 			}
 			continue
 		}
@@ -111,4 +111,12 @@ func splitGenericWords(words []string) ([]string, []string, []string) {
 	}
 
 	return globalOptions, actionPath, options
+}
+
+func parseOptionWord(word string, position int) Option {
+	name, value, ok := strings.Cut(word, "=")
+	if ok && name != "" {
+		return Option{Name: name, Value: value, HasValue: true, Position: position}
+	}
+	return Option{Name: word, Position: position}
 }

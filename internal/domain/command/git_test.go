@@ -9,9 +9,9 @@ func TestGitParserExtractsActionPathAndGlobalOptions(t *testing.T) {
 	tests := []struct {
 		name             string
 		raw              string
-		wantGlobal       []string
+		wantGlobal       []Option
 		wantAction       []string
-		wantOptions      []string
+		wantOptions      []Option
 		wantWorkingDir   string
 		wantStructuredOK bool
 	}{
@@ -24,7 +24,7 @@ func TestGitParserExtractsActionPathAndGlobalOptions(t *testing.T) {
 		{
 			name:             "working directory",
 			raw:              "git -C repo status",
-			wantGlobal:       []string{"-C=repo"},
+			wantGlobal:       []Option{{Name: "-C", Value: "repo", HasValue: true, Position: 0}},
 			wantAction:       []string{"status"},
 			wantWorkingDir:   "repo",
 			wantStructuredOK: true,
@@ -32,58 +32,58 @@ func TestGitParserExtractsActionPathAndGlobalOptions(t *testing.T) {
 		{
 			name:             "no pager",
 			raw:              "git --no-pager status",
-			wantGlobal:       []string{"--no-pager"},
+			wantGlobal:       []Option{{Name: "--no-pager", Position: 0}},
 			wantAction:       []string{"status"},
 			wantStructuredOK: true,
 		},
 		{
 			name:             "config",
 			raw:              "git -c core.quotePath=false status",
-			wantGlobal:       []string{"-c=core.quotePath=false"},
+			wantGlobal:       []Option{{Name: "-c", Value: "core.quotePath=false", HasValue: true, Position: 0}},
 			wantAction:       []string{"status"},
 			wantStructuredOK: true,
 		},
 		{
 			name:             "multiple globals and command option",
 			raw:              "git -C repo -c core.quotePath=false status --short",
-			wantGlobal:       []string{"-C=repo", "-c=core.quotePath=false"},
+			wantGlobal:       []Option{{Name: "-C", Value: "repo", HasValue: true, Position: 0}, {Name: "-c", Value: "core.quotePath=false", HasValue: true, Position: 2}},
 			wantAction:       []string{"status"},
-			wantOptions:      []string{"--short"},
+			wantOptions:      []Option{{Name: "--short", Position: 5}},
 			wantWorkingDir:   "repo",
 			wantStructuredOK: true,
 		},
 		{
 			name:             "git dir and work tree",
 			raw:              "git --git-dir .git --work-tree . status",
-			wantGlobal:       []string{"--git-dir=.git", "--work-tree=."},
+			wantGlobal:       []Option{{Name: "--git-dir", Value: ".git", HasValue: true, Position: 0}, {Name: "--work-tree", Value: ".", HasValue: true, Position: 2}},
 			wantAction:       []string{"status"},
 			wantStructuredOK: true,
 		},
 		{
 			name:             "git dir and work tree equals",
 			raw:              "git --git-dir=.git --work-tree=. status",
-			wantGlobal:       []string{"--git-dir=.git", "--work-tree=."},
+			wantGlobal:       []Option{{Name: "--git-dir", Value: ".git", HasValue: true, Position: 0}, {Name: "--work-tree", Value: ".", HasValue: true, Position: 1}},
 			wantAction:       []string{"status"},
 			wantStructuredOK: true,
 		},
 		{
 			name:             "namespace and bare",
 			raw:              "git --namespace main --bare status",
-			wantGlobal:       []string{"--namespace=main", "--bare"},
+			wantGlobal:       []Option{{Name: "--namespace", Value: "main", HasValue: true, Position: 0}, {Name: "--bare", Position: 2}},
 			wantAction:       []string{"status"},
 			wantStructuredOK: true,
 		},
 		{
 			name:             "namespace equals",
 			raw:              "git --namespace=main status",
-			wantGlobal:       []string{"--namespace=main"},
+			wantGlobal:       []Option{{Name: "--namespace", Value: "main", HasValue: true, Position: 0}},
 			wantAction:       []string{"status"},
 			wantStructuredOK: true,
 		},
 		{
 			name:             "double dash before action is not treated as status",
 			raw:              "git -C repo -- status",
-			wantGlobal:       []string{"-C=repo"},
+			wantGlobal:       []Option{{Name: "-C", Value: "repo", HasValue: true, Position: 0}},
 			wantAction:       []string{"--", "status"},
 			wantWorkingDir:   "repo",
 			wantStructuredOK: true,
@@ -119,6 +119,30 @@ func TestGitParserExtractsActionPathAndGlobalOptions(t *testing.T) {
 				t.Fatalf("WorkingDirectory = %q, want %q", cmd.WorkingDirectory, tt.wantWorkingDir)
 			}
 		})
+	}
+}
+
+func TestCommandOptionHelpers(t *testing.T) {
+	plan := Parse("git -C repo --git-dir=.git status --short --pathspec-from-file=list.txt")
+	if len(plan.Commands) != 1 {
+		t.Fatalf("len(Commands) = %d, want 1", len(plan.Commands))
+	}
+	cmd := plan.Commands[0]
+
+	if !cmd.HasGlobalOption("-C") {
+		t.Fatal("HasGlobalOption(-C) = false, want true")
+	}
+	if got := cmd.GlobalOptionValues("-C"); !reflect.DeepEqual(got, []string{"repo"}) {
+		t.Fatalf("GlobalOptionValues(-C) = %#v, want [repo]", got)
+	}
+	if got := cmd.GlobalOptionValues("--git-dir"); !reflect.DeepEqual(got, []string{".git"}) {
+		t.Fatalf("GlobalOptionValues(--git-dir) = %#v, want [.git]", got)
+	}
+	if !cmd.HasOption("--short") {
+		t.Fatal("HasOption(--short) = false, want true")
+	}
+	if got := cmd.OptionValues("--pathspec-from-file"); !reflect.DeepEqual(got, []string{"list.txt"}) {
+		t.Fatalf("OptionValues(--pathspec-from-file) = %#v, want [list.txt]", got)
 	}
 }
 
