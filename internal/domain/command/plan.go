@@ -86,6 +86,7 @@ type ShellShape struct {
 	HasSequence            bool
 	HasBackground          bool
 	HasRedirection         bool
+	HasSubshell            bool
 	HasCommandSubstitution bool
 	HasProcessSubstitution bool
 }
@@ -93,15 +94,9 @@ type ShellShape struct {
 type ShellShapeKind string
 
 const (
-	ShellShapeSimple     ShellShapeKind = "simple"
-	ShellShapeAndList    ShellShapeKind = "and_list"
-	ShellShapeOrList     ShellShapeKind = "or_list"
-	ShellShapeSequence   ShellShapeKind = "sequence"
-	ShellShapePipeline   ShellShapeKind = "pipeline"
-	ShellShapeBackground ShellShapeKind = "background"
-	ShellShapeRedirect   ShellShapeKind = "redirect"
-	ShellShapeSubshell   ShellShapeKind = "subshell"
-	ShellShapeUnknown    ShellShapeKind = "unknown"
+	ShellShapeSimple   ShellShapeKind = "simple"
+	ShellShapeCompound ShellShapeKind = "compound"
+	ShellShapeUnknown  ShellShapeKind = "unknown"
 )
 
 type Diagnostic struct {
@@ -182,15 +177,35 @@ func unsafeEvaluationReasons(plan CommandPlan) []string {
 		return dedupeStrings(reasons)
 	}
 
-	switch plan.Shape.Kind {
-	case ShellShapeSimple:
-		if !invocation.IsStructuredSafeForAllow(plan.Raw) {
-			reasons = append(reasons, "unsafe_ast")
-		}
-	case ShellShapeAndList, ShellShapeOrList, ShellShapeSequence, ShellShapePipeline:
+	if plan.Shape.Kind == ShellShapeUnknown {
+		reasons = append(reasons, "unknown_shape")
+	}
+	if plan.Shape.HasRedirection {
+		reasons = append(reasons, "redirect")
+	}
+	if plan.Shape.HasSubshell {
+		reasons = append(reasons, "subshell")
+	}
+	if plan.Shape.HasBackground {
+		reasons = append(reasons, "background")
+	}
+	if plan.Shape.HasCommandSubstitution {
+		reasons = append(reasons, "command_substitution")
+	}
+	if plan.Shape.HasProcessSubstitution {
+		reasons = append(reasons, "process_substitution")
+	}
+	if plan.Shape.HasPipeline && plan.Shape.hasNonPipelineCompoundFeature() {
+		reasons = append(reasons, "pipeline_compound_shape")
+	}
+	if len(reasons) > 0 {
+		return dedupeStrings(reasons)
+	}
+
+	if plan.Shape.Kind == ShellShapeCompound {
 		if len(plan.Commands) == 0 {
 			reasons = append(reasons, "unknown_shape")
-			break
+			return dedupeStrings(reasons)
 		}
 		for _, cmd := range plan.Commands {
 			if !invocation.IsStructuredSafeForAllow(cmd.Raw) {
@@ -198,19 +213,55 @@ func unsafeEvaluationReasons(plan CommandPlan) []string {
 				break
 			}
 		}
-	case ShellShapeUnknown:
+		return dedupeStrings(reasons)
+	}
+
+	if plan.Shape.Kind != ShellShapeSimple {
 		reasons = append(reasons, "unknown_shape")
-	case ShellShapeRedirect:
-		reasons = append(reasons, "redirect")
-	case ShellShapeSubshell:
-		reasons = append(reasons, "subshell")
-	case ShellShapeBackground:
-		reasons = append(reasons, "background")
-	default:
-		reasons = append(reasons, "unknown_shape")
+	} else if !invocation.IsStructuredSafeForAllow(plan.Raw) {
+		reasons = append(reasons, "unsafe_ast")
 	}
 
 	return dedupeStrings(reasons)
+}
+
+func (s ShellShape) hasNonPipelineCompoundFeature() bool {
+	return s.HasConditional ||
+		s.HasSequence ||
+		s.HasBackground ||
+		s.HasRedirection ||
+		s.HasSubshell ||
+		s.HasCommandSubstitution ||
+		s.HasProcessSubstitution
+}
+
+func (s ShellShape) Flags() []string {
+	flags := make([]string, 0, 8)
+	if s.HasPipeline {
+		flags = append(flags, "pipeline")
+	}
+	if s.HasConditional {
+		flags = append(flags, "conditional")
+	}
+	if s.HasSequence {
+		flags = append(flags, "sequence")
+	}
+	if s.HasBackground {
+		flags = append(flags, "background")
+	}
+	if s.HasRedirection {
+		flags = append(flags, "redirection")
+	}
+	if s.HasSubshell {
+		flags = append(flags, "subshell")
+	}
+	if s.HasCommandSubstitution {
+		flags = append(flags, "command_substitution")
+	}
+	if s.HasProcessSubstitution {
+		flags = append(flags, "process_substitution")
+	}
+	return flags
 }
 
 func dedupeStrings(values []string) []string {
@@ -265,7 +316,7 @@ func (w *planWalker) visitCommand(cmd syntax.Command) {
 	case *syntax.BinaryCmd:
 		w.visitBinary(x)
 	case *syntax.Subshell:
-		w.shape.Kind = ShellShapeSubshell
+		w.shape.HasSubshell = true
 		for _, stmt := range x.Stmts {
 			w.visitStmt(stmt)
 		}
@@ -283,15 +334,10 @@ func (w *planWalker) visitBinary(cmd *syntax.BinaryCmd) {
 	switch cmd.Op {
 	case syntax.AndStmt:
 		w.shape.HasConditional = true
-		if w.shape.Kind == "" {
-			w.shape.Kind = ShellShapeAndList
-		}
 	case syntax.OrStmt:
 		w.shape.HasConditional = true
-		w.shape.Kind = ShellShapeOrList
 	case syntax.Pipe, syntax.PipeAll:
 		w.shape.HasPipeline = true
-		w.shape.Kind = ShellShapePipeline
 	default:
 		w.shape.Kind = ShellShapeUnknown
 	}
@@ -362,37 +408,21 @@ func (w *planWalker) nodeRaw(node syntax.Node) string {
 }
 
 func (s ShellShape) finalize() ShellShape {
-	if s.HasPipeline {
-		s.Kind = ShellShapePipeline
+	if s.Kind == ShellShapeUnknown {
 		return s
 	}
-	if s.HasConditional {
-		if s.Kind != ShellShapeOrList {
-			s.Kind = ShellShapeAndList
-		}
+	if s.HasPipeline ||
+		s.HasConditional ||
+		s.HasSequence ||
+		s.HasBackground ||
+		s.HasRedirection ||
+		s.HasSubshell ||
+		s.HasCommandSubstitution ||
+		s.HasProcessSubstitution {
+		s.Kind = ShellShapeCompound
 		return s
 	}
-	if s.HasSequence {
-		s.Kind = ShellShapeSequence
-		return s
-	}
-	if s.HasBackground {
-		s.Kind = ShellShapeBackground
-		return s
-	}
-	if s.HasRedirection {
-		s.Kind = ShellShapeRedirect
-		return s
-	}
-	if s.HasCommandSubstitution {
-		s.Kind = ShellShapeUnknown
-		return s
-	}
-	if s.HasProcessSubstitution {
-		s.Kind = ShellShapeUnknown
-		return s
-	}
-	if s.Kind == "" || s.Kind == ShellShapeUnknown {
+	if s.Kind == "" {
 		s.Kind = ShellShapeSimple
 	}
 	return s

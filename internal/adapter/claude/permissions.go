@@ -81,7 +81,7 @@ func checkCommandWithRules(cmd string, denyRules []string, askRules []string, al
 	if anyAsk {
 		return PermissionAsk
 	}
-	if sawSegment && allSegmentsAllowed && len(allowRules) > 0 && claudeCompositionAllows(plan.Shape.Kind) {
+	if sawSegment && allSegmentsAllowed && len(allowRules) > 0 && claudeCompositionAllows(plan.Shape) {
 		return PermissionAllow
 	}
 	return PermissionDefault
@@ -182,13 +182,24 @@ func commandSegmentsForPermission(raw string, plan commandpkg.CommandPlan) []str
 	return segments
 }
 
-func claudeCompositionAllows(kind commandpkg.ShellShapeKind) bool {
-	switch kind {
-	case commandpkg.ShellShapeSimple, commandpkg.ShellShapeAndList, commandpkg.ShellShapeSequence, commandpkg.ShellShapeOrList, commandpkg.ShellShapePipeline:
+func claudeCompositionAllows(shape commandpkg.ShellShape) bool {
+	if shape.Kind == commandpkg.ShellShapeSimple {
 		return true
-	default:
+	}
+	if shape.Kind != commandpkg.ShellShapeCompound {
 		return false
 	}
+	if shape.HasBackground ||
+		shape.HasRedirection ||
+		shape.HasSubshell ||
+		shape.HasCommandSubstitution ||
+		shape.HasProcessSubstitution {
+		return false
+	}
+	if shape.HasPipeline && (shape.HasConditional || shape.HasSequence) {
+		return false
+	}
+	return shape.HasPipeline || shape.HasConditional || shape.HasSequence
 }
 
 func commandMatchesPattern(cmd string, pattern string) bool {

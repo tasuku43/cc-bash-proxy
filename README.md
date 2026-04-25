@@ -182,12 +182,13 @@ the raw command; use structured `match` rules for normal allow cases.
 Fail-closed means `allow` rules are ignored when parsing or shell-shape analysis
 cannot prove the command is in the supported evaluation subset. Any diagnostic,
 syntax parse error, unknown shell shape, redirection, background execution,
-subshell, process substitution, or unsafe AST inside an extracted command makes
-the command unsafe for automatic allow. Deny rules still run against unsafe
-commands, including extracted commands when the parser can find them, and the
-final fallback is `ask`. Trace output includes a `fail_closed` step whose
-reason identifies the unsafe boundary, such as `parse_error`, `unknown_shape`,
-or `unsafe_ast`.
+subshell, command substitution, process substitution, or unsafe AST inside an
+extracted command makes the command unsafe for automatic allow. Deny rules still
+run against unsafe commands, including extracted commands when the parser can
+find them, and the final fallback is `ask`. Trace output includes a
+`fail_closed` step whose reason identifies the unsafe boundary, such as
+`parse_error`, `unknown_shape`, `redirection`, `command_substitution`,
+`process_substitution`, or `unsafe_ast`.
 
 For Claude Code compatibility, normal composition does not allow a broad raw
 command pattern to grant permission across shell operators. Instead, the shell
@@ -196,7 +197,16 @@ and each command is evaluated independently. A structured allow rule for
 `cmd1` never implicitly allows `cmd2`.
 
 After every extracted command is evaluated, the whole compound command decision
-is derived from the `CommandPlan` shape:
+is derived from the `CommandPlan` shape. `Shape.Kind` is only a primary
+classification tag: `simple`, `compound`, or `unknown`. Detailed shell
+structure is retained additively in shape flags such as `pipeline`,
+`conditional`, `sequence`, `background`, `redirection`, `subshell`,
+`command_substitution`, and `process_substitution`. Trace steps for
+`fail_closed` and `composition` include both `shape` and `shape_flags`, so mixed
+expressions such as pipeline plus subshell plus redirection are not simplified
+before permission evaluation.
+
+For supported compound shapes, the decision is:
 
 - all commands are `allow` => `allow`
 - any command is `deny` => `deny`
@@ -221,9 +231,10 @@ Pipeline commands use the same independent command evaluation:
 An allow rule for the left side of a pipeline never implicitly allows the right
 side. This is intentionally conservative compared with broad raw wildcard
 matching across the full shell string, because the right side of a pipeline can
-interpret or execute data produced by the left side. Background, redirection,
-subshell, and unknown shapes are unsafe for automatic allow and ask by default
-unless an extracted command is denied.
+interpret or execute data produced by the left side. A pipeline combined with
+other shell features, and any background, redirection, subshell, substitution,
+or unknown shape, is unsafe for automatic allow and asks by default unless an
+extracted command is denied.
 
 Process substitution is evaluated with the same fail-closed boundary. Commands
 inside `<(...)` and `>(...)` are extracted and evaluated for deny rules, but the

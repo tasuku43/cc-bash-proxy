@@ -32,8 +32,8 @@ func TestParseCommandPlanSimpleGitStatus(t *testing.T) {
 func TestParseCommandPlanAndListExtractsCommandsButFailsClosed(t *testing.T) {
 	plan := Parse("git status && git diff")
 
-	if plan.Shape.Kind != ShellShapeAndList {
-		t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, ShellShapeAndList)
+	if plan.Shape.Kind != ShellShapeCompound {
+		t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, ShellShapeCompound)
 	}
 	if !plan.Shape.HasConditional {
 		t.Fatal("HasConditional = false, want true")
@@ -54,21 +54,24 @@ func TestParseCommandPlanMultiCommandListsExtractAllCommands(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
-		kind ShellShapeKind
+		flag string
 		want []string
 	}{
-		{name: "three and list", raw: "git status && git diff && git log", kind: ShellShapeAndList, want: []string{"git status", "git diff", "git log"}},
-		{name: "four sequence semicolon", raw: "git status; git diff; git log; git branch", kind: ShellShapeSequence, want: []string{"git status", "git diff", "git log", "git branch"}},
-		{name: "newline sequence", raw: "git status\ngit diff\ngit log", kind: ShellShapeSequence, want: []string{"git status", "git diff", "git log"}},
-		{name: "three or list", raw: "git status || git diff || git log", kind: ShellShapeOrList, want: []string{"git status", "git diff", "git log"}},
-		{name: "pipe all", raw: "git status |& sh", kind: ShellShapePipeline, want: []string{"git status", "sh"}},
+		{name: "three and list", raw: "git status && git diff && git log", flag: "conditional", want: []string{"git status", "git diff", "git log"}},
+		{name: "four sequence semicolon", raw: "git status; git diff; git log; git branch", flag: "sequence", want: []string{"git status", "git diff", "git log", "git branch"}},
+		{name: "newline sequence", raw: "git status\ngit diff\ngit log", flag: "sequence", want: []string{"git status", "git diff", "git log"}},
+		{name: "three or list", raw: "git status || git diff || git log", flag: "conditional", want: []string{"git status", "git diff", "git log"}},
+		{name: "pipe all", raw: "git status |& sh", flag: "pipeline", want: []string{"git status", "sh"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			plan := Parse(tt.raw)
-			if plan.Shape.Kind != tt.kind {
-				t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, tt.kind)
+			if plan.Shape.Kind != ShellShapeCompound {
+				t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, ShellShapeCompound)
+			}
+			if !containsString(plan.Shape.Flags(), tt.flag) {
+				t.Fatalf("Shape.Flags() = %#v, want %q", plan.Shape.Flags(), tt.flag)
 			}
 			if len(plan.Commands) != len(tt.want) {
 				t.Fatalf("len(Commands) = %d, want %d", len(plan.Commands), len(tt.want))
@@ -86,8 +89,8 @@ func TestParseCommandPlanMultiCommandListsExtractAllCommands(t *testing.T) {
 func TestParseCommandPlanPipelineExtractsCommandsButFailsClosed(t *testing.T) {
 	plan := Parse("git status | sh")
 
-	if plan.Shape.Kind != ShellShapePipeline {
-		t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, ShellShapePipeline)
+	if plan.Shape.Kind != ShellShapeCompound {
+		t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, ShellShapeCompound)
 	}
 	if !plan.Shape.HasPipeline {
 		t.Fatal("HasPipeline = false, want true")
@@ -117,8 +120,8 @@ func TestParseCommandPlanProcessSubstitutionExtractsCommandsButFailsClosed(t *te
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			plan := Parse(tt.raw)
-			if plan.Shape.Kind != ShellShapeUnknown {
-				t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, ShellShapeUnknown)
+			if plan.Shape.Kind != ShellShapeCompound {
+				t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, ShellShapeCompound)
 			}
 			if !plan.Shape.HasProcessSubstitution {
 				t.Fatal("HasProcessSubstitution = false, want true")
@@ -143,18 +146,21 @@ func TestParseCommandPlanUnsafeShellShapesFailClosed(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
-		kind ShellShapeKind
+		flag string
 	}{
-		{name: "sequence", raw: "git status; git diff", kind: ShellShapeSequence},
-		{name: "background", raw: "git status &", kind: ShellShapeBackground},
-		{name: "redirect", raw: "git status > /tmp/out", kind: ShellShapeRedirect},
+		{name: "sequence", raw: "git status; git diff", flag: "sequence"},
+		{name: "background", raw: "git status &", flag: "background"},
+		{name: "redirect", raw: "git status > /tmp/out", flag: "redirection"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			plan := Parse(tt.raw)
-			if plan.Shape.Kind != tt.kind {
-				t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, tt.kind)
+			if plan.Shape.Kind != ShellShapeCompound {
+				t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, ShellShapeCompound)
+			}
+			if !containsString(plan.Shape.Flags(), tt.flag) {
+				t.Fatalf("Shape.Flags() = %#v, want %q", plan.Shape.Flags(), tt.flag)
 			}
 			if plan.SafeForStructuredAllow {
 				t.Fatal("SafeForStructuredAllow = true, want false")
@@ -173,9 +179,9 @@ func TestCommandPlanEvaluationSafetyReasons(t *testing.T) {
 		{name: "simple", raw: "git status", wantSafe: true},
 		{name: "pipeline", raw: "git status | sh", wantSafe: true},
 		{name: "syntax error", raw: "git status &&", wantReason: "parse_error"},
-		{name: "process substitution", raw: "cat <(git status)", wantReason: "unknown_shape"},
+		{name: "process substitution", raw: "cat <(git status)", wantReason: "process_substitution"},
 		{name: "redirect", raw: "git status > /tmp/out", wantReason: "redirect"},
-		{name: "unsafe ast in extracted command", raw: "git status && echo $HOME", wantReason: "unsafe_ast"},
+		{name: "unknown word part in extracted command", raw: "git status && echo $HOME", wantReason: "unknown_shape"},
 	}
 
 	for _, tt := range tests {
@@ -188,6 +194,25 @@ func TestCommandPlanEvaluationSafetyReasons(t *testing.T) {
 				t.Fatalf("Reasons = %#v, want %q", safety.Reasons, tt.wantReason)
 			}
 		})
+	}
+}
+
+func TestParseCommandPlanCompoundShapePreservesAllFlags(t *testing.T) {
+	plan := Parse("(git status > /tmp/out) | sh")
+
+	if plan.Shape.Kind != ShellShapeCompound {
+		t.Fatalf("Shape.Kind = %q, want %q", plan.Shape.Kind, ShellShapeCompound)
+	}
+	for _, flag := range []string{"pipeline", "subshell", "redirection"} {
+		if !containsString(plan.Shape.Flags(), flag) {
+			t.Fatalf("Shape.Flags() = %#v, want %q", plan.Shape.Flags(), flag)
+		}
+	}
+	if !plan.Shape.HasPipeline || !plan.Shape.HasSubshell || !plan.Shape.HasRedirection {
+		t.Fatalf("Shape flags not preserved: %+v", plan.Shape)
+	}
+	if EvaluationSafetyForPlan(plan).Safe {
+		t.Fatalf("EvaluationSafetyForPlan(%q).Safe = true, want false", plan.Raw)
 	}
 }
 

@@ -42,10 +42,11 @@ Structured `allow` rules only auto-allow commands that are classified as safe
 for evaluation. Safe evaluation requires no parser diagnostics, a supported
 shell shape, and an AST-safe simple command for each command that would be
 allowed. Syntax parse errors, diagnostics, unknown shapes, redirects,
-subshells, background execution, process substitution, and unsafe `bash -c`
-payloads fail closed to `ask`. Pattern-based `allow` rules follow the same
-gate by default. `allow_unsafe_shell: true` can opt into full-command raw
-allow only after the command passes this fail-closed evaluation safety gate.
+subshells, background execution, command substitution, process substitution,
+and unsafe `bash -c` payloads fail closed to `ask`. Pattern-based `allow` rules
+follow the same gate by default. `allow_unsafe_shell: true` can opt into
+full-command raw allow only after the command passes this fail-closed
+evaluation safety gate.
 
 ## 4. Configuration Source
 
@@ -122,8 +123,9 @@ evaluation safety. A normal `allow` rule may match only commands classified as
 structured-safe for automatic allow. Supported compound lists and pipelines may
 be allowed only through composition, where every extracted command must be
 individually safe and allowed. Syntax parse errors, diagnostics, redirects,
-subshells, background execution, unknown shell shapes, process substitution,
-and unsafe AST forms never reach allow matching. An `allow` rule with
+subshells, background execution, unknown shell shapes, command substitution,
+process substitution, and unsafe AST forms never reach allow matching. An
+`allow` rule with
 `allow_unsafe_shell: true` opts into raw full-command allow for supported
 safe-for-evaluation shapes, but it cannot override parse errors, diagnostics,
 or unsupported shell shapes.
@@ -187,7 +189,23 @@ Because the contract is pipeline-based:
 
 Permission evaluation uses `CommandPlan.Commands` and `CommandPlan.Shape` for
 compound shell expressions after the raw/full-command permission stages above
-have not produced a decision.
+have not produced a decision. `CommandPlan.Shape.Kind` is a primary
+classification tag with only `simple`, `compound`, and `unknown` as current
+contract values. Detailed structure is stored as additive flags:
+
+- `HasPipeline`
+- `HasConditional`
+- `HasSequence`
+- `HasBackground`
+- `HasRedirection`
+- `HasSubshell`
+- `HasCommandSubstitution`
+- `HasProcessSubstitution`
+
+Evaluation must not infer safety from `Kind` alone. It must consult the flags
+so mixed structures such as pipeline plus subshell plus redirection remain
+visible to fail-closed logic. Trace entries for `fail_closed` and `composition`
+include both `shape` and `shape_flags`.
 
 Raw `deny` and raw `ask` pattern rules can block or require confirmation for a
 full compound command even when each extracted command would otherwise be
@@ -199,8 +217,9 @@ only commands that still pass the fail-closed evaluation safety gate.
 
 For `simple`, the existing structured allow behavior applies.
 
-For `and_list`, `sequence`, `or_list`, and `pipeline`, each extracted command is
-evaluated independently:
+For supported `compound` shapes with only list-style flags (`HasConditional`,
+`HasSequence`) or only `HasPipeline`, each extracted command is evaluated
+independently:
 
 - allow if every extracted command is individually `allow`
 - deny if any extracted command is individually `deny`
@@ -210,15 +229,18 @@ The pipeline policy is intentionally Claude-Code-compatible: `git status | sh`
 is allowed only when both `git status` and `sh` are individually allowed. A rule
 for the left side of a pipeline does not authorize the right side.
 
-For `background`, `redirect`, `subshell`, and `unknown`, allow rules are not
-evaluated. The default remains ask unless an extracted command is denied. These
-shapes keep their shell composition metadata on `CommandPlan.Shape`; individual
-`Command` objects do not store operator metadata.
+For `background`, `redirect`, `subshell`, command substitution, process
+substitution, pipeline combined with additional shell features, and `unknown`,
+allow rules are not evaluated. The default remains ask unless an extracted
+command is denied. These shapes keep their shell composition metadata on
+`CommandPlan.Shape`; individual `Command` objects do not store operator
+metadata.
 
-Process substitution is an `unknown` shell shape for allow purposes, but its
-inner statement list is still visited. Commands inside `<(...)` and `>(...)`
-are emitted as `composition.command` trace entries and are evaluated in
-`deny -> ask -> allow` order with the other extracted commands. For example,
-`cat <(rm -rf /tmp/x)` is denied when `rm -rf /tmp/x` matches a deny rule, and
-`echo >(sh)` is denied when `sh` matches a deny rule. If no extracted command is
-denied, the whole process-substitution expression still asks by default.
+Process substitution is a `compound` shell shape with
+`HasProcessSubstitution` set, and its inner statement list is still visited.
+Commands inside `<(...)` and `>(...)` are emitted as `composition.command` trace
+entries and are evaluated in `deny -> ask -> allow` order with the other
+extracted commands. For example, `cat <(rm -rf /tmp/x)` is denied when
+`rm -rf /tmp/x` matches a deny rule, and `echo >(sh)` is denied when `sh`
+matches a deny rule. If no extracted command is denied, the whole
+process-substitution expression still asks by default.

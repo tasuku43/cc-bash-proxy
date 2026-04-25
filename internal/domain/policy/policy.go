@@ -141,6 +141,7 @@ type TraceStep struct {
 	Program        string   `json:"program,omitempty"`
 	ActionPath     []string `json:"action_path,omitempty"`
 	Shape          string   `json:"shape,omitempty"`
+	ShapeFlags     []string `json:"shape_flags,omitempty"`
 	Relaxed        bool     `json:"relaxed,omitempty"`
 	Continue       bool     `json:"continue,omitempty"`
 	Source         *Source  `json:"source,omitempty"`
@@ -349,11 +350,12 @@ func Evaluate(p Pipeline, command string) (Decision, error) {
 
 func unsafeCommandTraceStep(plan commandpkg.CommandPlan, safety commandpkg.EvaluationSafety) TraceStep {
 	return TraceStep{
-		Action: "permission",
-		Name:   "fail_closed",
-		Effect: "ask",
-		Reason: strings.Join(safety.Reasons, ","),
-		Shape:  string(plan.Shape.Kind),
+		Action:     "permission",
+		Name:       "fail_closed",
+		Effect:     "ask",
+		Reason:     strings.Join(safety.Reasons, ","),
+		Shape:      string(plan.Shape.Kind),
+		ShapeFlags: plan.Shape.Flags(),
 	}
 }
 
@@ -476,10 +478,7 @@ func evaluateCommandPlanComposition(deny []preparedPermissionRule, ask []prepare
 		if includeDefaultAsk {
 			decision := compositionDecision{
 				Outcome: "ask",
-				Reason:  "unsafe command shape",
-			}
-			if plan.Shape.HasProcessSubstitution {
-				decision.Reason = "process substitution requires confirmation"
+				Reason:  unsafeCompositionReason(plan.Shape),
 			}
 			decision.Trace = compositionTrace(plan, decisions, decision)
 			return decision, true
@@ -487,8 +486,7 @@ func evaluateCommandPlanComposition(deny []preparedPermissionRule, ask []prepare
 		return compositionDecision{}, false
 	}
 
-	switch plan.Shape.Kind {
-	case commandpkg.ShellShapeAndList, commandpkg.ShellShapeSequence, commandpkg.ShellShapeOrList, commandpkg.ShellShapePipeline:
+	if isAllowableCompositionShape(plan.Shape) {
 		decision := compositionDecision{
 			Outcome:  "allow",
 			Message:  decisions[0].Rule.Message,
@@ -498,21 +496,54 @@ func evaluateCommandPlanComposition(deny []preparedPermissionRule, ask []prepare
 		}
 		decision.Trace = compositionTrace(plan, decisions, decision)
 		return decision, true
-	case commandpkg.ShellShapeBackground, commandpkg.ShellShapeRedirect, commandpkg.ShellShapeSubshell, commandpkg.ShellShapeUnknown:
-		if !includeDefaultAsk {
-			return compositionDecision{}, false
+	}
+
+	if includeDefaultAsk {
+		decision := compositionDecision{
+			Outcome: "ask",
+			Reason:  unsafeCompositionReason(plan.Shape),
 		}
-		if plan.Shape.HasProcessSubstitution {
-			decision := compositionDecision{
-				Outcome: "ask",
-				Reason:  "process substitution requires confirmation",
-			}
-			decision.Trace = compositionTrace(plan, decisions, decision)
-			return decision, true
-		}
-		return compositionDecision{}, false
+		decision.Trace = compositionTrace(plan, decisions, decision)
+		return decision, true
+	}
+	return compositionDecision{}, false
+}
+
+func isAllowableCompositionShape(shape commandpkg.ShellShape) bool {
+	if shape.Kind != commandpkg.ShellShapeCompound {
+		return false
+	}
+	if shape.HasBackground ||
+		shape.HasRedirection ||
+		shape.HasSubshell ||
+		shape.HasCommandSubstitution ||
+		shape.HasProcessSubstitution {
+		return false
+	}
+	if shape.HasPipeline && (shape.HasConditional || shape.HasSequence) {
+		return false
+	}
+	return shape.HasPipeline || shape.HasConditional || shape.HasSequence
+}
+
+func unsafeCompositionReason(shape commandpkg.ShellShape) string {
+	switch {
+	case shape.HasProcessSubstitution:
+		return "process substitution requires confirmation"
+	case shape.HasCommandSubstitution:
+		return "command substitution requires confirmation"
+	case shape.HasRedirection:
+		return "redirection requires confirmation"
+	case shape.HasSubshell:
+		return "subshell requires confirmation"
+	case shape.HasBackground:
+		return "background execution requires confirmation"
+	case shape.HasPipeline && (shape.HasConditional || shape.HasSequence):
+		return "pipeline compound shape requires confirmation"
+	case shape.Kind == commandpkg.ShellShapeUnknown:
+		return "unknown shell shape"
 	default:
-		return compositionDecision{}, false
+		return "unsafe command shape"
 	}
 }
 
@@ -564,14 +595,15 @@ func compositionTrace(plan commandpkg.CommandPlan, decisions []commandDecision, 
 		})
 	}
 	trace = append(trace, TraceStep{
-		Action:   "permission",
-		Effect:   decision.Outcome,
-		Name:     "composition",
-		RuleType: decision.RuleType,
-		Message:  decision.Message,
-		Reason:   decision.Reason,
-		Shape:    string(plan.Shape.Kind),
-		Source:   sourcePtr(decision.Source),
+		Action:     "permission",
+		Effect:     decision.Outcome,
+		Name:       "composition",
+		RuleType:   decision.RuleType,
+		Message:    decision.Message,
+		Reason:     decision.Reason,
+		Shape:      string(plan.Shape.Kind),
+		ShapeFlags: plan.Shape.Flags(),
+		Source:     sourcePtr(decision.Source),
 	})
 	return trace
 }

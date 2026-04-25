@@ -778,8 +778,11 @@ func TestEvaluateCompoundTraceIncludesPerCommandComposition(t *testing.T) {
 			}
 
 			final := got.Trace[len(got.Trace)-1]
-			if final.Name != "composition" || final.Shape != "and_list" || final.Effect != tt.wantOutcome || final.Reason != tt.wantReason {
-				t.Fatalf("final composition trace=%+v, want effect=%q shape=and_list reason=%q", final, tt.wantOutcome, tt.wantReason)
+			if final.Name != "composition" || final.Shape != "compound" || final.Effect != tt.wantOutcome || final.Reason != tt.wantReason {
+				t.Fatalf("final composition trace=%+v, want effect=%q shape=compound reason=%q", final, tt.wantOutcome, tt.wantReason)
+			}
+			if !containsString(final.ShapeFlags, "conditional") {
+				t.Fatalf("final composition shape_flags=%#v, want conditional; trace=%+v", final.ShapeFlags, got.Trace)
 			}
 		})
 	}
@@ -926,6 +929,43 @@ func TestEvaluateProcessSubstitutionAsksEvenWhenExtractedCommandsAllowed(t *test
 	}
 }
 
+func TestEvaluateCompoundTraceIncludesLosslessShapeFlags(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{
+				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+				{Match: MatchSpec{Command: "sh"}},
+			},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "(git status > /tmp/out) | sh")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "ask" {
+		t.Fatalf("Outcome = %q, want ask; decision=%+v", got.Outcome, got)
+	}
+	failClosed := firstTraceStepByName(got.Trace, "fail_closed")
+	if failClosed == nil {
+		t.Fatalf("fail_closed trace missing; trace=%+v", got.Trace)
+	}
+	for _, flag := range []string{"pipeline", "subshell", "redirection"} {
+		if !containsString(failClosed.ShapeFlags, flag) {
+			t.Fatalf("fail_closed shape_flags=%#v, want %q; trace=%+v", failClosed.ShapeFlags, flag, got.Trace)
+		}
+	}
+	final := got.Trace[len(got.Trace)-1]
+	if final.Name != "composition" || final.Shape != "compound" {
+		t.Fatalf("final trace=%+v, want compound composition; trace=%+v", final, got.Trace)
+	}
+	for _, flag := range []string{"pipeline", "subshell", "redirection"} {
+		if !containsString(final.ShapeFlags, flag) {
+			t.Fatalf("final shape_flags=%#v, want %q; trace=%+v", final.ShapeFlags, flag, got.Trace)
+		}
+	}
+}
+
 func TestMatchSpecGitSubcommandDoesNotTreatDoubleDashBeforeStatusAsStatus(t *testing.T) {
 	match := MatchSpec{Command: "git", Subcommand: "status"}
 	if match.MatchMatches("git -C repo -- status") {
@@ -1047,8 +1087,11 @@ func TestEvaluateUnknownShapeIgnoresUnsafeRawAllow(t *testing.T) {
 		t.Fatalf("Outcome = %q, want ask; decision=%+v", got.Outcome, got)
 	}
 	step := firstTraceStepByName(got.Trace, "fail_closed")
-	if step == nil || step.Reason != "unknown_shape" {
-		t.Fatalf("fail_closed trace=%+v, want unknown_shape; trace=%+v", step, got.Trace)
+	if step == nil || step.Reason != "process_substitution" {
+		t.Fatalf("fail_closed trace=%+v, want process_substitution; trace=%+v", step, got.Trace)
+	}
+	if !containsString(step.ShapeFlags, "process_substitution") {
+		t.Fatalf("fail_closed shape_flags=%#v, want process_substitution; trace=%+v", step.ShapeFlags, got.Trace)
 	}
 	final := got.Trace[len(got.Trace)-1]
 	if final.Name != "composition" || final.Effect != "ask" {
