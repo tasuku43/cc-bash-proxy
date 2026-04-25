@@ -156,7 +156,18 @@ allow lists, and `doctor` reports it as a warning.
 `cmd1 && cmd2`, `cmd1; cmd2`, `cmd1 || cmd2`, and `cmd1 | cmd2` are compound
 commands.
 
-For Claude Code compatibility, `cc-bash-proxy` does not allow a broad raw
+Permission evaluation is ordered. After rewrite, `cc-bash-proxy` first checks
+raw/full-command rules in bucket order: `deny`, then `ask`, then `allow`.
+Only after those stages do compound commands fall through to `CommandPlan`
+composition.
+
+This means a raw `deny` or `ask` pattern for the full command wins before
+composition, even when every extracted command would otherwise be allowed.
+Raw `allow` patterns are still guarded by shell safety. They cannot allow a
+compound command unless the rule explicitly sets `allow_unsafe_shell: true`,
+which opts in to allowing the whole shell expression.
+
+For Claude Code compatibility, normal composition does not allow a broad raw
 command pattern to grant permission across shell operators. Instead, the shell
 input is parsed into a `CommandPlan` containing individual `Command` entries,
 and each command is evaluated independently. A structured allow rule for

@@ -90,7 +90,18 @@ Examples:
 After the rewrite phase finishes, `cc-bash-proxy` evaluates permission rules against
 the resulting command.
 
-Permission buckets are evaluated in this fixed order:
+The full effective order is fixed:
+
+1. run the rewrite pipeline
+2. evaluate raw/full-command `deny` rules against the rewritten command
+3. evaluate raw/full-command `ask` rules against the rewritten command
+4. evaluate raw/full-command `allow` rules against the rewritten command
+5. evaluate `CommandPlan` composition for non-simple shell expressions
+6. return the default outcome, `ask`
+
+Raw/full-command rules include both structured `match` selectors and raw
+`pattern` / `patterns` selectors evaluated against the whole rewritten command
+string. The bucket order is therefore:
 
 1. `deny`
 2. `ask`
@@ -100,6 +111,13 @@ Within each bucket, source order is preserved.
 
 The first matching permission rule in the current bucket wins. If a bucket does
 not match, evaluation moves to the next bucket.
+
+For `allow` rules, the raw/full-command stage is gated by shell safety. A
+normal `allow` rule may match only commands classified as structured-safe for
+automatic allow. Compound lists, pipelines, redirects, subshells, and unsafe
+`bash -c` payloads do not pass this gate and continue to `CommandPlan`
+composition. An `allow` rule with `allow_unsafe_shell: true` opts out of that
+gate and may allow the whole rewritten command before composition runs.
 
 If nothing matches, the default outcome is `ask`.
 
@@ -159,8 +177,15 @@ Because the contract is pipeline-based:
 ## 10. Compound Command Composition
 
 Permission evaluation uses `CommandPlan.Commands` and `CommandPlan.Shape` for
-compound shell expressions. Allow rules are never matched against the raw
-compound string across shell operators.
+compound shell expressions after the raw/full-command permission stages above
+have not produced a decision.
+
+Raw `deny` and raw `ask` pattern rules are intentionally evaluated before
+composition, so either can block or require confirmation for a full compound
+command even when each extracted command would otherwise be individually
+allowed. Raw `allow` pattern rules do not bypass shell safety by default; they
+can allow the whole compound command only when the rule explicitly sets
+`allow_unsafe_shell: true`.
 
 For `simple`, the existing structured allow behavior applies.
 

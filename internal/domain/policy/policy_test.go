@@ -430,6 +430,108 @@ func TestEvaluateCompoundGitCommandsComposeIndividualCommandDecisions(t *testing
 	}
 }
 
+func TestEvaluateRawDenyPatternBeatsCompositionAllow(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Deny: []PermissionRuleSpec{{
+				Pattern: `^\s*git\s+status\s*&&\s*git\s+diff\s*$`,
+				Message: "raw compound denied",
+			}},
+			Allow: []PermissionRuleSpec{
+				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+				{Match: MatchSpec{Command: "git", Subcommand: "diff"}},
+			},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "git status && git diff")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "deny" {
+		t.Fatalf("Outcome = %q, want deny; decision=%+v", got.Outcome, got)
+	}
+	if got.Message != "raw compound denied" {
+		t.Fatalf("Message = %q, want raw deny message; decision=%+v", got.Message, got)
+	}
+	if steps := traceStepsByName(got.Trace, "composition"); len(steps) != 0 {
+		t.Fatalf("composition trace steps = %d, want 0; trace=%+v", len(steps), got.Trace)
+	}
+}
+
+func TestEvaluateRawAskPatternBeatsCompositionAllow(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Ask: []PermissionRuleSpec{{
+				Pattern: `^\s*git\s+status\s*&&\s*git\s+diff\s*$`,
+				Message: "raw compound asks",
+			}},
+			Allow: []PermissionRuleSpec{
+				{Match: MatchSpec{Command: "git", Subcommand: "status"}},
+				{Match: MatchSpec{Command: "git", Subcommand: "diff"}},
+			},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "git status && git diff")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "ask" {
+		t.Fatalf("Outcome = %q, want ask; decision=%+v", got.Outcome, got)
+	}
+	if got.Message != "raw compound asks" {
+		t.Fatalf("Message = %q, want raw ask message; decision=%+v", got.Message, got)
+	}
+	if steps := traceStepsByName(got.Trace, "composition"); len(steps) != 0 {
+		t.Fatalf("composition trace steps = %d, want 0; trace=%+v", len(steps), got.Trace)
+	}
+}
+
+func TestEvaluateUnsafeRawAllowPatternBeatsCompositionAsk(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Pattern:          `^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`,
+				AllowUnsafeShell: true,
+				Message:          "trusted full compound",
+			}},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "git status && rm -rf /tmp/x")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "allow" {
+		t.Fatalf("Outcome = %q, want allow; decision=%+v", got.Outcome, got)
+	}
+	if got.Message != "trusted full compound" {
+		t.Fatalf("Message = %q, want unsafe allow message; decision=%+v", got.Message, got)
+	}
+	if steps := traceStepsByName(got.Trace, "composition"); len(steps) != 0 {
+		t.Fatalf("composition trace steps = %d, want 0; trace=%+v", len(steps), got.Trace)
+	}
+}
+
+func TestEvaluateRawAllowPatternWithoutUnsafeShellDoesNotBypassComposition(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Pattern: `^\s*git\s+status\s*&&\s*rm\s+-rf\s+/tmp/x\s*$`,
+			}},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "git status && rm -rf /tmp/x")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "ask" {
+		t.Fatalf("Outcome = %q, want ask; decision=%+v", got.Outcome, got)
+	}
+}
+
 func TestEvaluateCompoundDenyWinsOverAllowedCommands(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
