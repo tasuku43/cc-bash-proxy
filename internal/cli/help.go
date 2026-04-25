@@ -12,14 +12,14 @@ import (
 func writeUsage(w io.Writer) {
 	fmt.Fprint(w, `cc-bash-guard
 
-Declarative, testable command policy for AI-agent shell commands.
+cc-bash-guard is a security-first Bash permission guard for Claude Code hooks.
 
 Typical workflow:
-  1. Edit ~/.config/cc-bash-guard/cc-bash-guard.yml
-  2. Optionally add .cc-bash-guard/cc-bash-guard.yaml in the project
-  3. Add permission and E2E tests
-  4. Run cc-bash-guard verify
-  5. Let Claude Code call cc-bash-guard hook from PreToolUse
+  cc-bash-guard init
+  edit ~/.config/cc-bash-guard/cc-bash-guard.yml
+  cc-bash-guard verify
+  cc-bash-guard doctor
+  configure Claude Code to call cc-bash-guard hook
 
 Usage:
   cc-bash-guard <command> [flags]
@@ -33,21 +33,27 @@ Commands:
   semantic-schema
            print supported semantic match schemas
 
-Help:
-  cc-bash-guard help <command>
-  cc-bash-guard <command> --help
-  cc-bash-guard help config
-  cc-bash-guard help match
+Policy model:
+  Use command for semantic-supported commands.
+  Use env for environment variable predicates.
+  Use patterns for raw regex fallbacks and commands without semantic support.
+  cc-bash-guard evaluates commands but does not rewrite them.
+
+Learn more:
+  cc-bash-guard help permission
   cc-bash-guard help semantic
   cc-bash-guard help semantic git
+  cc-bash-guard help examples
+  cc-bash-guard help troubleshoot
 
 Examples:
   cc-bash-guard init
-  cc-bash-guard verify --format json
+  cc-bash-guard verify
   cc-bash-guard semantic-schema --format json
-  cc-bash-guard version --format json
   cc-bash-guard hook --rtk
-  cc-bash-guard doctor --format json
+
+Docs:
+  docs/user/QUICKSTART.md
 `)
 }
 
@@ -161,6 +167,170 @@ Examples:
   cc-bash-guard semantic-schema --format json
   cc-bash-guard semantic-schema git --format json
 `)
+	case "permission":
+		fmt.Fprint(w, `cc-bash-guard help permission
+
+Permission rules are grouped into deny, ask, and allow buckets.
+
+Rule fields:
+  command   Match a command by name and, when supported, command-specific semantic fields.
+  env       Match environment variables required or missing for the invocation.
+  patterns  Match the raw command string with one or more regular expressions.
+
+Valid combinations:
+  command
+  command + env
+  command + semantic
+  command + semantic + env
+  patterns
+  patterns + env
+  env
+
+When to use each matcher:
+  Use command.semantic for commands listed by cc-bash-guard help semantic.
+  The semantic schema is selected by command.name.
+  Use patterns for commands without semantic support or for raw regex fallbacks.
+  Use env when a rule depends on variables such as AWS_PROFILE.
+
+Example:
+  permission:
+    allow:
+      - name: git read-only
+        command:
+          name: git
+          semantic:
+            verb_in:
+              - status
+              - diff
+              - log
+              - show
+
+      - name: AWS identity
+        command:
+          name: aws
+          semantic:
+            service: sts
+            operation: get-caller-identity
+        env:
+          requires:
+            - AWS_PROFILE
+
+      - name: read-only basics
+        patterns:
+          - "^ls(\\s|$)"
+          - "^pwd$"
+
+Docs:
+  docs/user/PERMISSION_SCHEMA.md
+`)
+	case "examples":
+		fmt.Fprint(w, `cc-bash-guard help examples
+
+Copyable permission policy examples using the current rule shape.
+
+Git read-only allow:
+  permission:
+    allow:
+      - name: git read-only
+        command:
+          name: git
+          semantic:
+            verb_in:
+              - status
+              - diff
+              - log
+              - show
+
+Git force push deny:
+  permission:
+    deny:
+      - name: git force push
+        command:
+          name: git
+          semantic:
+            verb: push
+            force: true
+
+AWS identity allow:
+  permission:
+    allow:
+      - name: AWS identity
+        command:
+          name: aws
+          semantic:
+            service: sts
+            operation: get-caller-identity
+        env:
+          requires:
+            - AWS_PROFILE
+
+kubectl read-only allow:
+  permission:
+    allow:
+      - name: kubectl read-only
+        command:
+          name: kubectl
+          semantic:
+            verb_in:
+              - get
+              - describe
+
+Read-only shell basics:
+  permission:
+    allow:
+      - name: read-only shell basics
+        patterns:
+          - "^ls(\\s|$)"
+          - "^pwd$"
+
+Unknown command fallback:
+  permission:
+    ask:
+      - name: tool preview
+        patterns:
+          - "^my-tool\\s+preview(\\s|$)"
+
+Docs:
+  docs/user/EXAMPLES.md
+`)
+	case "troubleshoot":
+		fmt.Fprint(w, `cc-bash-guard help troubleshoot
+
+Common checks:
+
+Verified artifact missing or stale:
+  Run cc-bash-guard verify after editing policy. The hook fails closed when the
+  verified artifact is missing or stale unless hook --auto-verify is configured.
+
+Unsupported semantic field:
+  Run cc-bash-guard help semantic <command> or
+  cc-bash-guard semantic-schema <command> --format json. If verify reports an
+  unknown key, use the current permission shape: command, env, and patterns.
+
+Command has no semantic schema:
+  Use patterns for raw regex rules. Semantic matching only works for commands
+  listed by cc-bash-guard help semantic.
+
+All permission sources abstained:
+  The final result is ask. Add an allow, ask, or deny rule when you want an
+  explicit decision.
+
+Regex pattern not matching:
+  patterns match the raw command string. Anchor carefully and escape backslashes
+  for YAML double-quoted strings, or use single-quoted YAML strings.
+
+AWS profile style:
+  Prefer AWS_PROFILE=myprof aws eks list-clusters in project guidance. The AWS
+  parser can still evaluate profile, service, and operation semantically.
+
+Command not being rewritten:
+  cc-bash-guard evaluates commands but does not rewrite them. Parser-backed
+  normalization is evaluation-only.
+
+Docs:
+  docs/user/TROUBLESHOOTING.md
+  docs/user/AWS_GUIDELINES.md
+`)
 	case "config":
 		fmt.Fprint(w, `cc-bash-guard help config
 
@@ -217,49 +387,7 @@ For semantic command schemas, run:
 
 `)
 	case "match":
-		fmt.Fprint(w, `cc-bash-guard help match
-
-Permission rules do not use match or pattern. Permission rules use:
-  - command: command name plus command-specific semantic matcher
-  - env: execution environment matcher with requires and missing
-  - patterns: raw command string regex list
-Permission command does not support command_in; use multiple patterns for
-multi-command raw fallbacks.
-
-permission command.semantic:
-  command.semantic is command-specific. The schema is selected by exact
-  command.name. Do not write semantic.git or semantic.gh.
-
-  GenericParser fallback never satisfies semantic match.
-
-  semantic.flags_contains and semantic.flags_prefixes inspect tokens recognized
-  as options/flags by the command-specific parser. They do not run when a
-  semantic parser is unavailable.
-
-Permission predicate combinations:
-  command, command + env, command + semantic, command + semantic + env,
-  patterns, patterns + env, and env only. command + patterns is invalid.
-
-Discover semantic schemas:
-  cc-bash-guard help semantic
-  cc-bash-guard help semantic <command>
-  cc-bash-guard semantic-schema --format json
-
-Example:
-  command:
-    name: aws
-    semantic:
-      service: sts
-  env:
-    requires:
-      - AWS_PROFILE
-
-patterns is the raw regex escape hatch for permission rules.
-
-Example:
-  patterns:
-    - '^\s*helm\s+upgrade\b'
-`)
+		writeCommandHelp(w, "permission")
 	default:
 		writeUsage(w)
 	}
@@ -269,8 +397,9 @@ func writeSemanticHelp(w io.Writer, args []string) error {
 	if len(args) == 0 {
 		fmt.Fprint(w, `Semantic match schemas
 
-command.semantic is command-specific. The schema is selected by command.name.
-Do not nest another command key under semantic.
+Semantic matchers are command-specific.
+The schema is selected by command.name.
+Supported commands are generated from the semantic schema registry.
 
 Supported commands:
 `)
@@ -278,7 +407,7 @@ Supported commands:
 			fmt.Fprintf(w, "  %-10s %s\n", schema.Command, schema.Description)
 		}
 		fmt.Fprint(w, `
-Usage:
+Try:
   cc-bash-guard help semantic <command>
   cc-bash-guard semantic-schema --format json
   cc-bash-guard semantic-schema <command> --format json
@@ -294,8 +423,10 @@ Example:
 
 Notes:
   semantic.flags_contains / semantic.flags_prefixes inspect options
-  recognized by the command-specific parser and never match on GenericParser
-  fallback.
+  recognized by the command-specific parser.
+
+Docs:
+  docs/user/SEMANTIC_SCHEMAS.md
 `)
 		return nil
 	}
@@ -323,7 +454,6 @@ Notes:
 	}
 	fmt.Fprint(w, "\nValidation rules:\n")
 	fmt.Fprint(w, "  - permission command.semantic requires exact command.name.\n")
-	fmt.Fprint(w, "  - top-level rewrite is unsupported.\n")
 	fmt.Fprint(w, "  - unsupported fields and unsupported value types fail verify.\n")
 	fmt.Fprint(w, "  - GenericParser fallback never satisfies semantic match.\n")
 	if len(schema.Examples) > 0 {
@@ -331,6 +461,11 @@ Notes:
 		for _, example := range schema.Examples {
 			fmt.Fprintf(w, "  %s:\n%s\n", example.Title, indent(example.YAML, "    "))
 		}
+	}
+	fmt.Fprint(w, "\nDocs:\n")
+	fmt.Fprint(w, "  docs/user/SEMANTIC_SCHEMAS.md\n")
+	if schema.Command == "aws" {
+		fmt.Fprint(w, "  docs/user/AWS_GUIDELINES.md\n")
 	}
 	return nil
 }
