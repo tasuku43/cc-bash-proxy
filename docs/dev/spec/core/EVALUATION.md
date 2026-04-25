@@ -39,11 +39,13 @@ invocation model that may include:
   safe
 
 Structured `allow` rules only auto-allow commands that are classified as safe
-single-command expressions. Compound shell expressions such as `&&`, `;`, `|`,
-redirects, process substitution, or unsafe `bash -c` payloads fail closed to
-`ask`. Pattern-based `allow` rules follow the same gate by default and may
-only allow those shell shapes when the rule explicitly sets
-`allow_unsafe_shell: true`.
+for evaluation. Safe evaluation requires no parser diagnostics, a supported
+shell shape, and an AST-safe simple command for each command that would be
+allowed. Syntax parse errors, diagnostics, unknown shapes, redirects,
+subshells, background execution, process substitution, and unsafe `bash -c`
+payloads fail closed to `ask`. Pattern-based `allow` rules follow the same
+gate by default. `allow_unsafe_shell: true` can opt into full-command raw
+allow only after the command passes this fail-closed evaluation safety gate.
 
 ## 4. Configuration Source
 
@@ -94,10 +96,13 @@ The full effective order is fixed:
 
 1. run the rewrite pipeline
 2. evaluate raw/full-command `deny` rules against the rewritten command
-3. evaluate raw/full-command `ask` rules against the rewritten command
-4. evaluate raw/full-command `allow` rules against the rewritten command
-5. evaluate `CommandPlan` composition for non-simple shell expressions
-6. return the default outcome, `ask`
+3. evaluate extracted-command composition for `deny`/explicit `ask` when the
+   rewritten command is unsafe for automatic allow
+4. evaluate raw/full-command `ask` rules against the rewritten command
+5. stop at `ask` when the rewritten command is unsafe for automatic allow
+6. evaluate raw/full-command `allow` rules against the rewritten command
+7. evaluate `CommandPlan` composition for non-simple shell expressions
+8. return the default outcome, `ask`
 
 Raw/full-command rules include both structured `match` selectors and raw
 `pattern` / `patterns` selectors evaluated against the whole rewritten command
@@ -112,12 +117,16 @@ Within each bucket, source order is preserved.
 The first matching permission rule in the current bucket wins. If a bucket does
 not match, evaluation moves to the next bucket.
 
-For `allow` rules, the raw/full-command stage is gated by shell safety. A
-normal `allow` rule may match only commands classified as structured-safe for
-automatic allow. Compound lists, pipelines, redirects, subshells, and unsafe
-`bash -c` payloads do not pass this gate and continue to `CommandPlan`
-composition. An `allow` rule with `allow_unsafe_shell: true` opts out of that
-gate and may allow the whole rewritten command before composition runs.
+For `allow` rules, the raw/full-command stage is gated by fail-closed
+evaluation safety. A normal `allow` rule may match only commands classified as
+structured-safe for automatic allow. Supported compound lists and pipelines may
+be allowed only through composition, where every extracted command must be
+individually safe and allowed. Syntax parse errors, diagnostics, redirects,
+subshells, background execution, unknown shell shapes, process substitution,
+and unsafe AST forms never reach allow matching. An `allow` rule with
+`allow_unsafe_shell: true` opts into raw full-command allow for supported
+safe-for-evaluation shapes, but it cannot override parse errors, diagnostics,
+or unsupported shell shapes.
 
 If nothing matches, the default outcome is `ask`.
 
@@ -180,12 +189,13 @@ Permission evaluation uses `CommandPlan.Commands` and `CommandPlan.Shape` for
 compound shell expressions after the raw/full-command permission stages above
 have not produced a decision.
 
-Raw `deny` and raw `ask` pattern rules are intentionally evaluated before
-composition, so either can block or require confirmation for a full compound
-command even when each extracted command would otherwise be individually
-allowed. Raw `allow` pattern rules do not bypass shell safety by default; they
-can allow the whole compound command only when the rule explicitly sets
-`allow_unsafe_shell: true`.
+Raw `deny` and raw `ask` pattern rules can block or require confirmation for a
+full compound command even when each extracted command would otherwise be
+individually allowed. Unsafe commands record a `fail_closed` trace step before
+permission matching continues. Deny rules still apply to unsafe commands,
+including extracted commands when available. Raw `allow` pattern rules do not
+bypass shell safety by default; with `allow_unsafe_shell: true`, they can allow
+only commands that still pass the fail-closed evaluation safety gate.
 
 For `simple`, the existing structured allow behavior applies.
 
@@ -200,10 +210,10 @@ The pipeline policy is intentionally Claude-Code-compatible: `git status | sh`
 is allowed only when both `git status` and `sh` are individually allowed. A rule
 for the left side of a pipeline does not authorize the right side.
 
-For `background`, `redirect`, `subshell`, and `unknown`, the default remains
-ask unless an extracted command is denied. These shapes keep their shell
-composition metadata on `CommandPlan.Shape`; individual `Command` objects do not
-store operator metadata.
+For `background`, `redirect`, `subshell`, and `unknown`, allow rules are not
+evaluated. The default remains ask unless an extracted command is denied. These
+shapes keep their shell composition metadata on `CommandPlan.Shape`; individual
+`Command` objects do not store operator metadata.
 
 Process substitution is an `unknown` shell shape for allow purposes, but its
 inner statement list is still visited. Commands inside `<(...)` and `>(...)`

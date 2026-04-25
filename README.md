@@ -175,9 +175,20 @@ extracted command wins before raw `allow`, even if that raw allow explicitly
 sets `allow_unsafe_shell: true`.
 
 Raw `allow` is dangerous and opt-in. It is disabled unless the rule explicitly
-sets `allow_unsafe_shell: true`, which grants permission to the whole matched
-shell expression. Without that opt-in, raw allow patterns do not allow the raw
-command; use structured `match` rules for normal allow cases.
+sets `allow_unsafe_shell: true`, which can grant permission to the whole matched
+shell expression only after the rewritten command passes the fail-closed
+evaluation safety gate. Without that opt-in, raw allow patterns do not allow
+the raw command; use structured `match` rules for normal allow cases.
+
+Fail-closed means `allow` rules are ignored when parsing or shell-shape analysis
+cannot prove the command is in the supported evaluation subset. Any diagnostic,
+syntax parse error, unknown shell shape, redirection, background execution,
+subshell, process substitution, or unsafe AST inside an extracted command makes
+the command unsafe for automatic allow. Deny rules still run against unsafe
+commands, including extracted commands when the parser can find them, and the
+final fallback is `ask`. Trace output includes a `fail_closed` step whose
+reason identifies the unsafe boundary, such as `parse_error`, `unknown_shape`,
+or `unsafe_ast`.
 
 For Claude Code compatibility, normal composition does not allow a broad raw
 command pattern to grant permission across shell operators. Instead, the shell
@@ -212,13 +223,12 @@ An allow rule for the left side of a pipeline never implicitly allows the right
 side. This is intentionally conservative compared with broad raw wildcard
 matching across the full shell string, because the right side of a pipeline can
 interpret or execute data produced by the left side. Background, redirection,
-subshell, and unknown shapes ask by default unless an extracted command is
-denied.
+subshell, and unknown shapes are unsafe for automatic allow and ask by default
+unless an extracted command is denied.
 
 Process substitution is evaluated with the same fail-closed boundary. Commands
 inside `<(...)` and `>(...)` are extracted and evaluated for deny rules, but the
-whole shell expression is not implicitly allowed by structured or raw allow
-rules unless an unsafe full-expression allow explicitly opts in.
+whole shell expression is not allowed by structured or raw allow rules.
 
 Examples:
 

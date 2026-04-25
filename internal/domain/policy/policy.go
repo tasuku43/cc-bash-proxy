@@ -291,6 +291,12 @@ func Evaluate(p Pipeline, command string) (Decision, error) {
 		}
 	}
 
+	plan := commandpkg.Parse(current)
+	safety := commandpkg.EvaluationSafetyForPlan(plan)
+	if !safety.Safe {
+		trace = append(trace, unsafeCommandTraceStep(plan, safety))
+	}
+
 	if rule, ok := firstPreparedRawPermissionMatch(prepared.Deny, current); ok {
 		trace = append(trace, permissionTraceStep("deny", permissionRuleTypeRaw, rule))
 		return Decision{Outcome: "deny", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
@@ -298,6 +304,12 @@ func Evaluate(p Pipeline, command string) (Decision, error) {
 	if rule, ok := firstPreparedStructuredPermissionMatch(prepared.Deny, current); ok {
 		trace = append(trace, permissionTraceStep("deny", permissionRuleTypeStructured, rule))
 		return Decision{Outcome: "deny", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
+	}
+	if !safety.Safe {
+		if decision, ok := evaluateCommandPlanComposition(prepared.Deny, prepared.Ask, prepared.Allow, plan, false, false); ok {
+			trace = append(trace, decision.Trace...)
+			return Decision{Outcome: decision.Outcome, Command: current, OriginalCommand: command, Message: decision.Message, Trace: trace}, nil
+		}
 	}
 	if rule, ok := firstPreparedRawPermissionMatch(prepared.Ask, current); ok {
 		trace = append(trace, permissionTraceStep("ask", permissionRuleTypeRaw, rule))
@@ -307,11 +319,18 @@ func Evaluate(p Pipeline, command string) (Decision, error) {
 		trace = append(trace, permissionTraceStep("ask", permissionRuleTypeStructured, rule))
 		return Decision{Outcome: "ask", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
 	}
+	if !safety.Safe {
+		if decision, ok := evaluateCommandPlanComposition(prepared.Deny, prepared.Ask, prepared.Allow, plan, true, false); ok {
+			trace = append(trace, decision.Trace...)
+			return Decision{Outcome: decision.Outcome, Command: current, OriginalCommand: command, Message: decision.Message, Trace: trace}, nil
+		}
+		return Decision{Outcome: "ask", Command: current, OriginalCommand: command, Trace: trace}, nil
+	}
 	if rule, ok := firstPreparedStructuredAllowPermissionMatch(prepared.Allow, current); ok {
 		trace = append(trace, permissionTraceStep("allow", permissionRuleTypeStructured, rule))
 		return Decision{Outcome: "allow", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
 	}
-	if decision, ok := evaluateCommandPlanComposition(prepared.Deny, prepared.Ask, prepared.Allow, current, false); ok {
+	if decision, ok := evaluateCommandPlanComposition(prepared.Deny, prepared.Ask, prepared.Allow, plan, false, true); ok {
 		trace = append(trace, decision.Trace...)
 		return Decision{Outcome: decision.Outcome, Command: current, OriginalCommand: command, Message: decision.Message, Trace: trace}, nil
 	}
@@ -319,13 +338,23 @@ func Evaluate(p Pipeline, command string) (Decision, error) {
 		trace = append(trace, permissionTraceStep("allow", permissionRuleTypeRaw, rule))
 		return Decision{Outcome: "allow", Command: current, OriginalCommand: command, Message: rule.Message, Trace: trace}, nil
 	}
-	if decision, ok := evaluateCommandPlanComposition(prepared.Deny, prepared.Ask, prepared.Allow, current, true); ok {
+	if decision, ok := evaluateCommandPlanComposition(prepared.Deny, prepared.Ask, prepared.Allow, plan, true, true); ok {
 		trace = append(trace, decision.Trace...)
 		return Decision{Outcome: decision.Outcome, Command: current, OriginalCommand: command, Message: decision.Message, Trace: trace}, nil
 	}
 
 	trace = append(trace, TraceStep{Action: "permission", Effect: "ask", Name: "default"})
 	return Decision{Outcome: "ask", Command: current, OriginalCommand: command, Trace: trace}, nil
+}
+
+func unsafeCommandTraceStep(plan commandpkg.CommandPlan, safety commandpkg.EvaluationSafety) TraceStep {
+	return TraceStep{
+		Action: "permission",
+		Name:   "fail_closed",
+		Effect: "ask",
+		Reason: strings.Join(safety.Reasons, ","),
+		Shape:  string(plan.Shape.Kind),
+	}
 }
 
 func permissionTraceStep(effect string, ruleType string, rule PermissionRuleSpec) TraceStep {
@@ -373,6 +402,9 @@ func firstPreparedRawAllowPermissionMatch(rules []preparedPermissionRule, comman
 		if !rule.Spec.AllowUnsafeShell {
 			continue
 		}
+		if !allowRuleCanMatch(rule.Spec, command) {
+			continue
+		}
 		if rule.Selector.matchesRaw(command) {
 			return rule.Spec, true
 		}
@@ -397,8 +429,7 @@ type compositionDecision struct {
 	Trace    []TraceStep
 }
 
-func evaluateCommandPlanComposition(deny []preparedPermissionRule, ask []preparedPermissionRule, allow []preparedPermissionRule, raw string, includeDefaultAsk bool) (compositionDecision, bool) {
-	plan := commandpkg.Parse(raw)
+func evaluateCommandPlanComposition(deny []preparedPermissionRule, ask []preparedPermissionRule, allow []preparedPermissionRule, plan commandpkg.CommandPlan, includeDefaultAsk bool, allowComposition bool) (compositionDecision, bool) {
 	if plan.Shape.Kind == commandpkg.ShellShapeSimple || len(plan.Commands) == 0 {
 		return compositionDecision{}, false
 	}
@@ -439,6 +470,20 @@ func evaluateCommandPlanComposition(deny []preparedPermissionRule, ask []prepare
 		}
 	}
 	if !allAllowed {
+		return compositionDecision{}, false
+	}
+	if !allowComposition {
+		if includeDefaultAsk {
+			decision := compositionDecision{
+				Outcome: "ask",
+				Reason:  "unsafe command shape",
+			}
+			if plan.Shape.HasProcessSubstitution {
+				decision.Reason = "process substitution requires confirmation"
+			}
+			decision.Trace = compositionTrace(plan, decisions, decision)
+			return decision, true
+		}
 		return compositionDecision{}, false
 	}
 
@@ -595,6 +640,10 @@ func matchStructuralScopeMatches(match MatchSpec, cmd commandpkg.Command) bool {
 }
 
 func allowRuleCanMatch(rule PermissionRuleSpec, command string) bool {
+	plan := commandpkg.Parse(command)
+	if !commandpkg.IsSafeForEvaluation(plan) {
+		return false
+	}
 	if rule.AllowUnsafeShell {
 		return true
 	}
@@ -649,7 +698,7 @@ func PermissionAllowRuleMatches(rule PermissionRuleSpec, command string) bool {
 	if selector.hasStructuredSelector() {
 		return allowRuleCanMatch(rule, command) && selector.matchesStructured(command)
 	}
-	return rule.AllowUnsafeShell && selector.matchesRaw(command)
+	return allowRuleCanMatch(rule, command) && rule.AllowUnsafeShell && selector.matchesRaw(command)
 }
 
 func selectorMatches(command string, match MatchSpec, pattern string, patterns []string) bool {

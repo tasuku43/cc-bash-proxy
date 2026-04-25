@@ -943,6 +943,15 @@ func traceStepsByName(trace []TraceStep, name string) []TraceStep {
 	return steps
 }
 
+func firstTraceStepByName(trace []TraceStep, name string) *TraceStep {
+	for i := range trace {
+		if trace[i].Name == name {
+			return &trace[i]
+		}
+	}
+	return nil
+}
+
 func TestEvaluatePatternAllowFailsClosedOnUnsafeShellExpressions(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
@@ -958,6 +967,92 @@ func TestEvaluatePatternAllowFailsClosedOnUnsafeShellExpressions(t *testing.T) {
 	}
 	if got.Outcome != "ask" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestEvaluateSyntaxErrorFailsClosedBeforeAllow(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Pattern:          `.*`,
+				AllowUnsafeShell: true,
+				Message:          "unsafe raw allow",
+			}},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "git status &&")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "ask" {
+		t.Fatalf("Outcome = %q, want ask; decision=%+v", got.Outcome, got)
+	}
+	step := firstTraceStepByName(got.Trace, "fail_closed")
+	if step == nil || step.Reason != "parse_error" {
+		t.Fatalf("fail_closed trace=%+v, want parse_error; trace=%+v", step, got.Trace)
+	}
+	if last := got.Trace[len(got.Trace)-1]; last.Effect == "allow" {
+		t.Fatalf("unexpected allow trace=%+v", got.Trace)
+	}
+}
+
+func TestEvaluateUnsafeCommandStillAppliesRawDeny(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Deny: []PermissionRuleSpec{{
+				Pattern: `^\s*rm\s+-rf\s+/tmp/x\s*&&`,
+				Message: "raw deny wins",
+			}},
+			Allow: []PermissionRuleSpec{{
+				Pattern:          `.*`,
+				AllowUnsafeShell: true,
+				Message:          "unsafe raw allow",
+			}},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "rm -rf /tmp/x &&")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "deny" {
+		t.Fatalf("Outcome = %q, want deny; decision=%+v", got.Outcome, got)
+	}
+	if got.Message != "raw deny wins" {
+		t.Fatalf("Message = %q, want raw deny message; decision=%+v", got.Message, got)
+	}
+	step := firstTraceStepByName(got.Trace, "fail_closed")
+	if step == nil || step.Reason != "parse_error" {
+		t.Fatalf("fail_closed trace=%+v, want parse_error; trace=%+v", step, got.Trace)
+	}
+}
+
+func TestEvaluateUnknownShapeIgnoresUnsafeRawAllow(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Pattern:          `^\s*cat\s+<\(git\s+status\)\s*$`,
+				AllowUnsafeShell: true,
+				Message:          "unsafe raw allow",
+			}},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "cat <(git status)")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "ask" {
+		t.Fatalf("Outcome = %q, want ask; decision=%+v", got.Outcome, got)
+	}
+	step := firstTraceStepByName(got.Trace, "fail_closed")
+	if step == nil || step.Reason != "unknown_shape" {
+		t.Fatalf("fail_closed trace=%+v, want unknown_shape; trace=%+v", step, got.Trace)
+	}
+	final := got.Trace[len(got.Trace)-1]
+	if final.Name != "composition" || final.Effect != "ask" {
+		t.Fatalf("final trace=%+v, want composition ask; trace=%+v", final, got.Trace)
 	}
 }
 

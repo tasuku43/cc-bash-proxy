@@ -109,6 +109,11 @@ type Diagnostic struct {
 	Message  string
 }
 
+type EvaluationSafety struct {
+	Safe    bool
+	Reasons []string
+}
+
 func Parse(raw string) CommandPlan {
 	return ParseWithRegistry(raw, DefaultParserRegistry())
 }
@@ -148,6 +153,80 @@ func ParseWithRegistry(raw string, registry *CommandParserRegistry) CommandPlan 
 		len(plan.Diagnostics) == 0 &&
 		invocation.IsStructuredSafeForAllow(raw)
 	return plan
+}
+
+func IsSafeForEvaluation(plan CommandPlan) bool {
+	return EvaluationSafetyForPlan(plan).Safe
+}
+
+func EvaluationSafetyForPlan(plan CommandPlan) EvaluationSafety {
+	reasons := unsafeEvaluationReasons(plan)
+	return EvaluationSafety{
+		Safe:    len(reasons) == 0,
+		Reasons: reasons,
+	}
+}
+
+func unsafeEvaluationReasons(plan CommandPlan) []string {
+	var reasons []string
+	if len(plan.Diagnostics) > 0 {
+		for _, diagnostic := range plan.Diagnostics {
+			if diagnostic.Severity == "error" {
+				reasons = append(reasons, "parse_error")
+				break
+			}
+		}
+		if len(reasons) == 0 {
+			reasons = append(reasons, "diagnostics")
+		}
+		return dedupeStrings(reasons)
+	}
+
+	switch plan.Shape.Kind {
+	case ShellShapeSimple:
+		if !invocation.IsStructuredSafeForAllow(plan.Raw) {
+			reasons = append(reasons, "unsafe_ast")
+		}
+	case ShellShapeAndList, ShellShapeOrList, ShellShapeSequence, ShellShapePipeline:
+		if len(plan.Commands) == 0 {
+			reasons = append(reasons, "unknown_shape")
+			break
+		}
+		for _, cmd := range plan.Commands {
+			if !invocation.IsStructuredSafeForAllow(cmd.Raw) {
+				reasons = append(reasons, "unsafe_ast")
+				break
+			}
+		}
+	case ShellShapeUnknown:
+		reasons = append(reasons, "unknown_shape")
+	case ShellShapeRedirect:
+		reasons = append(reasons, "redirect")
+	case ShellShapeSubshell:
+		reasons = append(reasons, "subshell")
+	case ShellShapeBackground:
+		reasons = append(reasons, "background")
+	default:
+		reasons = append(reasons, "unknown_shape")
+	}
+
+	return dedupeStrings(reasons)
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 type planWalker struct {

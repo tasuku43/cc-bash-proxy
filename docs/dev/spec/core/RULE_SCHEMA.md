@@ -169,8 +169,9 @@ Each permission rule may contain:
 
 - required selector: exactly one of `match`, `pattern`, or `patterns`
 - optional `message`
-- optional `allow_unsafe_shell` for `allow` rules that intentionally allow
-  unsafe shell expressions; when true, `message` is required
+- optional `allow_unsafe_shell` for raw `allow` rules that intentionally allow
+  a supported full shell expression after it passes the fail-closed evaluation
+  safety gate; when true, `message` is required
 - required `test`
 
 ### Permission rule example
@@ -204,11 +205,12 @@ deny:
         - "git diff HEAD~1"
 ```
 
-For `permission.allow`, `pattern` and `patterns` still fail closed to `ask`
-when the command is an unsafe shell expression such as a pipeline, compound
-list, redirect, or unsafe `bash -c` payload. Set `allow_unsafe_shell: true`
-only for intentionally trusted shell shapes, and include a `message` explaining
-that trust boundary.
+For `permission.allow`, `pattern` and `patterns` fail closed to `ask` unless
+the command is safe for evaluation. Syntax parse errors, diagnostics, unknown
+shapes, redirects, subshells, background execution, process substitution, and
+unsafe AST forms never reach allow matching. Set `allow_unsafe_shell: true`
+only for intentionally trusted full-command raw matches that still pass that
+safety gate, and include a `message` explaining that trust boundary.
 
 Compound commands are evaluated through `CommandPlan.Commands` plus
 `CommandPlan.Shape`, not by matching the raw command string across shell
@@ -216,8 +218,9 @@ operators. For `and_list`, `sequence`, `or_list`, and `pipeline`, every
 extracted command must be individually allowed for the whole command to be
 allowed; any denied extracted command denies the whole command; otherwise the
 whole command asks. This includes pipelines by design for Claude Code
-compatibility. `background`, `redirect`, `subshell`, and unknown shapes ask by
-default unless an extracted command is denied.
+compatibility. `background`, `redirect`, `subshell`, and unknown shapes cannot
+be allowed automatically and ask by default unless an extracted command is
+denied.
 
 Process substitution is treated as an unknown shape for allow purposes, while
 commands inside `<(...)` and `>(...)` are still extracted for deny evaluation.

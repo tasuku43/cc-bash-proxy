@@ -163,6 +163,34 @@ func TestParseCommandPlanUnsafeShellShapesFailClosed(t *testing.T) {
 	}
 }
 
+func TestCommandPlanEvaluationSafetyReasons(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		wantSafe   bool
+		wantReason string
+	}{
+		{name: "simple", raw: "git status", wantSafe: true},
+		{name: "pipeline", raw: "git status | sh", wantSafe: true},
+		{name: "syntax error", raw: "git status &&", wantReason: "parse_error"},
+		{name: "process substitution", raw: "cat <(git status)", wantReason: "unknown_shape"},
+		{name: "redirect", raw: "git status > /tmp/out", wantReason: "redirect"},
+		{name: "unsafe ast in extracted command", raw: "git status && echo $HOME", wantReason: "unsafe_ast"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			safety := EvaluationSafetyForPlan(Parse(tt.raw))
+			if safety.Safe != tt.wantSafe {
+				t.Fatalf("Safe = %v, want %v; safety=%+v", safety.Safe, tt.wantSafe, safety)
+			}
+			if tt.wantReason != "" && !containsString(safety.Reasons, tt.wantReason) {
+				t.Fatalf("Reasons = %#v, want %q", safety.Reasons, tt.wantReason)
+			}
+		})
+	}
+}
+
 func assertNoShellConnectorMetadata(t *testing.T, commands []Command) {
 	t.Helper()
 	for _, cmd := range commands {
@@ -176,6 +204,15 @@ func assertNoShellConnectorMetadata(t *testing.T, commands []Command) {
 			}
 		}
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParserRegistryDispatchesKnownParser(t *testing.T) {
