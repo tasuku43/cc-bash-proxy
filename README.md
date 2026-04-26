@@ -157,8 +157,7 @@ aws --profile myprof eks list-clusters
 `profile`, `service`, and `operation` semantically for policy evaluation. Use
 policy `ask` or `deny` rules for ambiguous or dangerous command styles.
 
-`cc-bash-guard` does not rewrite commands, so it can be composed with separate
-rewrite tools such as `rtk` without a compatibility flag.
+`cc-bash-guard` does not rewrite commands.
 
 ## Shell Evaluation
 

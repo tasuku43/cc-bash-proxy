@@ -115,12 +115,6 @@ func TestClaudeHookRegistrationCheckDetectsStructuredSettings(t *testing.T) {
 			wantMessage: "Bash matcher exists but cc-bash-guard hook is missing",
 		},
 		{
-			name:        "cc-bash-guard hook with retired --rtk warns",
-			settings:    `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"cc-bash-guard hook --rtk"}]}]}}`,
-			wantStatus:  StatusWarn,
-			wantMessage: "retired --rtk",
-		},
-		{
 			name:        "malformed JSON gives clear warning",
 			settings:    `{"hooks":`,
 			wantStatus:  StatusWarn,

@@ -27,5 +27,4 @@ when all sources abstain.
 because it does not rewrite commands. Parser-backed normalization is
 evaluation-only.
 
-`cc-bash-guard hook` does not rewrite commands. Rewrite tools such as `rtk`
-must be configured separately from this permission-only policy model.
+`cc-bash-guard hook` does not rewrite commands.

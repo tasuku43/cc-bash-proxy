@@ -119,21 +119,6 @@ func runClaudeHookMapTest(t *testing.T, spec hookEnvSpec) map[string]any {
 	return payload
 }
 
-func TestRunHookRejectsRetiredRTKOption(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := Run([]string{"hook", "--rtk"}, Streams{
-		Stdin:  strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"git status"}}`),
-		Stdout: &stdout,
-		Stderr: &stderr,
-	}, Env{Cwd: t.TempDir(), Home: t.TempDir()})
-	if code == 0 {
-		t.Fatalf("expected --rtk to fail, stdout=%s stderr=%s", stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "cc-bash-guard hook [--auto-verify]") {
-		t.Fatalf("expected hook usage without --rtk, stderr=%s", stderr.String())
-	}
-}
-
 func TestRunHookClaudeAllowReturnsAllowWithoutUpdatedInput(t *testing.T) {
 	home := t.TempDir()
 	writeClaudeSettings(t, home, `{
