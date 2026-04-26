@@ -10,6 +10,8 @@ permission:
 ```
 
 Each rule can use `command`, `env`, and `patterns`.
+Each rule may also set `message`; when that rule determines `allow`, `ask`, or
+`deny`, the message is returned as Claude Code's permission decision reason.
 
 ## command
 

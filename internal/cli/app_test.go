@@ -761,6 +761,92 @@ test:
 	}
 }
 
+func TestRunHookClaudeAllowUsesRuleMessageAsPermissionDecisionReason(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: git status
+      command:
+        name: git
+        semantic:
+          verb: status
+      message: "git status auto-approved"
+      test:
+        allow:
+          - "git status"
+        pass:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"hook", "--auto-verify"}, Streams{
+		Stdin:  strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"git status"}}`),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v", err)
+	}
+	hookOut := payload["hookSpecificOutput"].(map[string]any)
+	if hookOut["permissionDecision"] != "allow" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if got := hookOut["permissionDecisionReason"]; got != "git status auto-approved" {
+		t.Fatalf("permissionDecisionReason = %q, want rule message; payload=%+v", got, payload)
+	}
+}
+
+func TestRunHookClaudeAskUsesRuleMessageAsPermissionDecisionReason(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  ask:
+    - name: git diff review
+      command:
+        name: git
+        semantic:
+          verb: diff
+      message: "git diff requires confirmation"
+      test:
+        ask:
+          - "git diff"
+        pass:
+          - "git status"
+test:
+  - in: "git diff"
+    decision: ask
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"hook", "--auto-verify"}, Streams{
+		Stdin:  strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"git diff"}}`),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v", err)
+	}
+	hookOut := payload["hookSpecificOutput"].(map[string]any)
+	if _, ok := hookOut["permissionDecision"]; ok {
+		t.Fatalf("ask should not set permissionDecision directly; payload=%+v", payload)
+	}
+	if got := hookOut["permissionDecisionReason"]; got != "git diff requires confirmation" {
+		t.Fatalf("permissionDecisionReason = %q, want rule message; payload=%+v", got, payload)
+	}
+}
+
 func TestRunHookClaudeRTKEvaluatesPermissionsBeforeRTKRewrite(t *testing.T) {
 	home := t.TempDir()
 	toolDir := t.TempDir()

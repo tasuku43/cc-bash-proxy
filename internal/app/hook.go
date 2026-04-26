@@ -74,7 +74,7 @@ func hookPayload(decision policy.Decision, originalCommand string) map[string]an
 	case "allow", "ask":
 		hookOutput := map[string]any{
 			"hookEventName":            "PreToolUse",
-			"permissionDecisionReason": "cc-bash-guard permission evaluated",
+			"permissionDecisionReason": permissionDecisionReason(decision, "cc-bash-guard permission evaluated"),
 		}
 		if decision.Command != originalCommand {
 			hookOutput["updatedInput"] = map[string]any{"command": decision.Command}
@@ -96,10 +96,7 @@ func hookPayload(decision policy.Decision, originalCommand string) map[string]an
 		}
 		return payload
 	case "deny":
-		reason := decision.Message
-		if strings.TrimSpace(reason) == "" {
-			reason = "cc-bash-guard denied by policy"
-		}
+		reason := permissionDecisionReason(decision, "cc-bash-guard denied by policy")
 		return map[string]any{
 			"hookSpecificOutput": map[string]any{
 				"hookEventName":            "PreToolUse",
@@ -116,6 +113,13 @@ func hookPayload(decision policy.Decision, originalCommand string) map[string]an
 	default:
 		return hookErrorPayload(claude.Tool, "runtime_error", "unsupported decision outcome")
 	}
+}
+
+func permissionDecisionReason(decision policy.Decision, fallback string) string {
+	if reason := strings.TrimSpace(decision.Message); reason != "" {
+		return reason
+	}
+	return fallback
 }
 
 func hookErrorPayload(tool string, code string, message string) map[string]any {

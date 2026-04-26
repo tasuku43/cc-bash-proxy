@@ -119,6 +119,9 @@ permission:
       message: "helm upgrade requires confirmation"
 ```
 
+`message` is surfaced as Claude Code's permission decision reason when a rule
+determines `allow`, `ask`, or `deny`.
+
 Use `patterns` for commands without a semantic parser, including read-only
 basics such as `ls`, `cat`, `grep`, `head`, `tail`, and `pwd`. Patterns match
 the original command string and each parsed command element, including shell
