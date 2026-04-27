@@ -66,25 +66,27 @@ type VerifyDecisions struct {
 }
 
 type VerifyDiagnostic struct {
-	Kind            string           `json:"kind"`
-	Title           string           `json:"title,omitempty"`
-	Source          *VerifySource    `json:"source,omitempty"`
-	Message         string           `json:"message,omitempty"`
-	Input           string           `json:"input,omitempty"`
-	Expected        string           `json:"expected,omitempty"`
-	Actual          string           `json:"actual,omitempty"`
-	Reason          string           `json:"reason,omitempty"`
-	Decisions       *VerifyDecisions `json:"decisions,omitempty"`
-	MatchedRule     *VerifySource    `json:"matched_rule,omitempty"`
-	MatchedMessage  string           `json:"matched_message,omitempty"`
-	Command         string           `json:"command,omitempty"`
-	Field           string           `json:"field,omitempty"`
-	ExpectedType    string           `json:"expected_type,omitempty"`
-	ActualType      string           `json:"actual_type,omitempty"`
-	SupportedFields []string         `json:"supported_fields,omitempty"`
-	Hint            string           `json:"hint,omitempty"`
-	First           *VerifySource    `json:"first,omitempty"`
-	Second          *VerifySource    `json:"second,omitempty"`
+	Kind             string           `json:"kind"`
+	Title            string           `json:"title,omitempty"`
+	Source           *VerifySource    `json:"source,omitempty"`
+	Message          string           `json:"message,omitempty"`
+	Input            string           `json:"input,omitempty"`
+	Pattern          string           `json:"pattern,omitempty"`
+	Expected         string           `json:"expected,omitempty"`
+	Actual           string           `json:"actual,omitempty"`
+	Reason           string           `json:"reason,omitempty"`
+	Decisions        *VerifyDecisions `json:"decisions,omitempty"`
+	MatchedRule      *VerifySource    `json:"matched_rule,omitempty"`
+	MatchedMessage   string           `json:"matched_message,omitempty"`
+	Command          string           `json:"command,omitempty"`
+	Field            string           `json:"field,omitempty"`
+	ExpectedType     string           `json:"expected_type,omitempty"`
+	ActualType       string           `json:"actual_type,omitempty"`
+	SupportedFields  []string         `json:"supported_fields,omitempty"`
+	Hint             string           `json:"hint,omitempty"`
+	SaferAlternative string           `json:"safer_alternative,omitempty"`
+	First            *VerifySource    `json:"first,omitempty"`
+	Second           *VerifySource    `json:"second,omitempty"`
 }
 
 type VerifyOptions struct {

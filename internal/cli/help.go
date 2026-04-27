@@ -145,6 +145,8 @@ Output:
   ANSI color. NO_COLOR and TERM=dumb disable color for human output.
   Use top-level test entries to cover both allowed examples and near misses,
   especially for patterns fallback rules. See docs/user/EXAMPLES.md.
+  Verify also warns on broad allow.patterns, including unanchored regexes,
+  whole command namespaces such as ^aws, and broad shell-metacharacter matches.
 
 Semantic diagnostics:
   Unsupported semantic fields and invalid semantic types include the command,

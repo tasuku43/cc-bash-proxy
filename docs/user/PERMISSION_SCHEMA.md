@@ -135,6 +135,12 @@ Safer pattern rules are narrow and test-backed:
 - remember that allowed commands can invoke scripts, plugins, or subcommands
   that are not deeply inspected, such as `npm run lint` or `make test`
 
+`cc-bash-guard verify` reports broad `permission.allow[*].patterns` as
+warnings when a regex is unanchored, allows a whole command namespace, or uses
+broad wildcards that can match shell metacharacters. These remain warnings so
+existing valid policies keep loading, but the safer fix is usually
+`command.semantic` for supported commands or a narrower anchored regex.
+
 Example fallback for a command without semantic support:
 
 ```yaml

@@ -2085,6 +2085,179 @@ test:
 	}
 }
 
+func TestRunVerifyBroadAllowPatternWarningHuman(t *testing.T) {
+	cwd := t.TempDir()
+	writeProjectConfig(t, cwd, `permission:
+  allow:
+    - name: broad aws fallback
+      patterns:
+        - "^aws"
+      test:
+        allow: ["aws sts get-caller-identity"]
+        pass: ["git status"]
+test:
+  - in: "aws sts get-caller-identity"
+    decision: allow
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: cwd, Home: t.TempDir()})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"PASS verify",
+		"WARN warnings: 1",
+		"Broad allow pattern",
+		`pattern: ^aws`,
+		`.cc-bash-guard/cc-bash-guard.yaml permission.allow[0] "broad aws fallback"`,
+		"allows the aws command namespace without a meaningful subcommand boundary",
+		"Prefer permission.allow.command with command.name: aws",
+		"Safer alternative:",
+		"command.semantic for aws",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunVerifySafeAnchoredReadOnlyPatternDoesNotWarn(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: terraform read-only fallback
+      patterns:
+        - '^[[:space:]]*terraform\s+(plan|show)(\s|$)[^;&|<>]*$'
+      test:
+        allow: ["terraform plan"]
+        pass: ["terraform apply -auto-approve"]
+test:
+  - in: "terraform plan"
+    decision: allow
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify", "--format", "json"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		Summary struct {
+			Warnings int `json:"warnings"`
+		} `json:"summary"`
+		Warnings []app.VerifyDiagnostic `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v stdout=%s", err, stdout.String())
+	}
+	if payload.Summary.Warnings != 0 || len(payload.Warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", payload)
+	}
+}
+
+func TestRunVerifyBroadDenyAndAskPatternsDoNotWarn(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  deny:
+    - name: deny any aws fallback
+      patterns:
+        - "^aws"
+      test:
+        deny: ["aws s3 rm s3://bucket/key"]
+        pass: ["git status"]
+  ask:
+    - name: ask any kubectl fallback
+      patterns:
+        - "^kubectl"
+      test:
+        ask: ["kubectl delete pod x"]
+        pass: ["git status"]
+test:
+  - in: "aws s3 rm s3://bucket/key"
+    decision: deny
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify", "--format", "json"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		Summary struct {
+			Warnings int `json:"warnings"`
+		} `json:"summary"`
+		Warnings []app.VerifyDiagnostic `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v stdout=%s", err, stdout.String())
+	}
+	if payload.Summary.Warnings != 0 || len(payload.Warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", payload)
+	}
+}
+
+func TestRunVerifyBroadAllowPatternWarningJSONShape(t *testing.T) {
+	cwd := t.TempDir()
+	writeProjectConfig(t, cwd, `permission:
+  allow:
+    - name: broad terraform fallback
+      patterns:
+        - "^terraform\\s+.*"
+      test:
+        allow: ["terraform plan"]
+        pass: ["git status"]
+test:
+  - in: "terraform plan"
+    decision: allow
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify", "--format", "json"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: cwd, Home: t.TempDir()})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		OK      bool `json:"ok"`
+		Summary struct {
+			Warnings int `json:"warnings"`
+		} `json:"summary"`
+		Warnings []struct {
+			Kind             string           `json:"kind"`
+			Title            string           `json:"title"`
+			Source           app.VerifySource `json:"source"`
+			Pattern          string           `json:"pattern"`
+			Message          string           `json:"message"`
+			Reason           string           `json:"reason"`
+			Hint             string           `json:"hint"`
+			SaferAlternative string           `json:"safer_alternative"`
+		} `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v stdout=%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Summary.Warnings != 1 || len(payload.Warnings) != 1 {
+		t.Fatalf("payload=%+v", payload)
+	}
+	warning := payload.Warnings[0]
+	if warning.Kind != "broad_allow_pattern" ||
+		warning.Title != "Broad allow pattern" ||
+		warning.Pattern != `^terraform\s+.*` ||
+		warning.Source.Section != "permission" ||
+		warning.Source.Bucket != "allow" ||
+		warning.Source.Index != 0 ||
+		warning.Source.Name != "broad terraform fallback" ||
+		!strings.Contains(warning.Source.File, ".cc-bash-guard/cc-bash-guard.yaml") ||
+		!strings.Contains(warning.Message, "allow.patterns rule is broad") ||
+		!strings.Contains(warning.Reason, "terraform command namespace") ||
+		!strings.Contains(warning.Reason, "shell metacharacters") ||
+		!strings.Contains(warning.Hint, "narrower regex") ||
+		warning.SaferAlternative == "" {
+		t.Fatalf("warning=%+v", warning)
+	}
+}
+
 func TestRunVerifyAllFailuresJSON(t *testing.T) {
 	home := t.TempDir()
 	writeUserConfig(t, home, `permission:

@@ -133,9 +133,138 @@ func verifyWarnings(loaded configrepo.Loaded) []VerifyDiagnostic {
 				Message: "env-only allow can allow any command when env matches",
 			})
 		}
+		warnings = append(warnings, broadAllowPatternWarnings(rule)...)
 	}
 	warnings = append(warnings, duplicateRuleNameWarnings(loaded.Pipeline)...)
 	return warnings
+}
+
+func broadAllowPatternWarnings(rule policy.PermissionRuleSpec) []VerifyDiagnostic {
+	var warnings []VerifyDiagnostic
+	for _, pattern := range rule.Patterns {
+		if warning, ok := broadAllowPatternWarning(rule, pattern); ok {
+			warnings = append(warnings, warning)
+		}
+	}
+	return warnings
+}
+
+func broadAllowPatternWarning(rule policy.PermissionRuleSpec, pattern string) (VerifyDiagnostic, bool) {
+	p := strings.TrimSpace(pattern)
+	var reasons []string
+
+	if p == ".*" || p == "^.*" || p == "^.*$" {
+		reasons = append(reasons, "matches nearly any command")
+	}
+	if p != "" && !strings.HasPrefix(p, "^") {
+		reasons = append(reasons, "is not anchored at the beginning, so it can match after another command or argument")
+	}
+	if cmd, ok := broadCommandPrefixPattern(p); ok {
+		reasons = append(reasons, "allows the "+cmd+" command namespace without a meaningful subcommand boundary")
+	}
+	if broadShellMetacharPattern(p) {
+		reasons = append(reasons, "uses a broad wildcard that can also match shell metacharacters such as ;, &, |, backticks, $(), redirects, or subshell syntax")
+	}
+	if len(reasons) == 0 {
+		return VerifyDiagnostic{}, false
+	}
+
+	return VerifyDiagnostic{
+		Kind:             "broad_allow_pattern",
+		Title:            "Broad allow pattern",
+		Source:           sourceFromPolicy(rule.Source, rule.Name),
+		Pattern:          pattern,
+		Message:          "allow.patterns rule is broad: " + strings.Join(reasons, "; "),
+		Reason:           strings.Join(reasons, "; "),
+		Hint:             saferPatternHint(pattern),
+		SaferAlternative: saferPatternAlternative(pattern),
+	}, true
+}
+
+func broadCommandPrefixPattern(pattern string) (string, bool) {
+	for _, cmd := range []string{"aws", "kubectl", "git", "gh", "terraform", "npm", "make"} {
+		prefix := "^" + cmd
+		if !strings.HasPrefix(pattern, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(pattern, prefix)
+		if rest == "" || rest == "$" {
+			return cmd, true
+		}
+		if startsLiteralCommandContinuation(rest) {
+			continue
+		}
+		if strings.HasPrefix(rest, ".*") || strings.HasPrefix(rest, ".+") {
+			return cmd, true
+		}
+		if strings.HasPrefix(rest, `\b`) || strings.HasPrefix(rest, `(\s|$)`) || strings.HasPrefix(rest, `(?:\s|$)`) {
+			return cmd, true
+		}
+		afterBoundary, ok := trimRegexWhitespaceBoundary(rest)
+		if !ok {
+			return cmd, true
+		}
+		afterBoundary = strings.TrimSpace(afterBoundary)
+		if afterBoundary == "" || afterBoundary == "$" || strings.HasPrefix(afterBoundary, ".*") || strings.HasPrefix(afterBoundary, ".+") {
+			return cmd, true
+		}
+	}
+	return "", false
+}
+
+func startsLiteralCommandContinuation(s string) bool {
+	if s == "" {
+		return false
+	}
+	r := rune(s[0])
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-'
+}
+
+func trimRegexWhitespaceBoundary(s string) (string, bool) {
+	for _, prefix := range []string{`\s+`, `\s*`, `[[:space:]]+`, `[[:space:]]*`, ` +`, ` *`} {
+		if strings.HasPrefix(s, prefix) {
+			return strings.TrimPrefix(s, prefix), true
+		}
+	}
+	return s, false
+}
+
+func broadShellMetacharPattern(pattern string) bool {
+	if !strings.Contains(pattern, ".*") && !strings.Contains(pattern, ".+") {
+		return false
+	}
+	if strings.Contains(pattern, `[^;&|`) || strings.Contains(pattern, `[^;|&`) {
+		return false
+	}
+	return true
+}
+
+func saferPatternHint(pattern string) string {
+	if cmd, ok := anchoredCommandName(pattern); ok {
+		if _, supported := semanticpkg.Lookup(cmd); supported {
+			return "Prefer permission.allow.command with command.name: " + cmd + " and command.semantic fields for the intended read-only operation."
+		}
+	}
+	return "Use a narrower regex anchored with ^ and $, include an explicit subcommand, and exclude shell metacharacters where raw patterns are required."
+}
+
+func saferPatternAlternative(pattern string) string {
+	if cmd, ok := anchoredCommandName(pattern); ok {
+		if _, supported := semanticpkg.Lookup(cmd); supported {
+			return "command.semantic for " + cmd
+		}
+		return "^" + cmd + `\s+<read-only-subcommand>(\s|$)[^;&|` + "`" + `$()<>]*$`
+	}
+	return `^<command>\s+<read-only-subcommand>(\s|$)[^;&|` + "`" + `$()<>]*$`
+}
+
+func anchoredCommandName(pattern string) (string, bool) {
+	for _, cmd := range []string{"aws", "kubectl", "git", "gh", "terraform", "npm", "make"} {
+		if strings.HasPrefix(pattern, "^"+cmd) {
+			return cmd, true
+		}
+	}
+	return "", false
 }
 
 func duplicateRuleNameWarnings(p policy.Pipeline) []VerifyDiagnostic {

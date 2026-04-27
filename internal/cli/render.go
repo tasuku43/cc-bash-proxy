@@ -58,6 +58,7 @@ func writeVerifyText(w io.Writer, result app.VerifyResult, color colorScheme) {
 			artifact = "updated"
 		}
 		writeVerifySummary(w, result, artifact)
+		writeVerifyWarnings(w, result, color)
 		return
 	}
 	fmt.Fprintf(w, "%s verify\n", color.red(color.bold("FAIL")))
@@ -67,12 +68,7 @@ func writeVerifyText(w io.Writer, result app.VerifyResult, color colorScheme) {
 	for i, failure := range result.Diagnostics {
 		writeVerifyDiagnostic(w, color, "Failure", i+1, failure)
 	}
-	if len(result.Warnings) > 0 {
-		fmt.Fprintf(w, "%s warnings: %d\n\n", color.yellow(color.bold("WARN")), len(result.Warnings))
-		for i, warning := range result.Warnings {
-			writeVerifyDiagnostic(w, color, "Warning", i+1, warning)
-		}
-	}
+	writeVerifyWarnings(w, result, color)
 	fmt.Fprintln(w, color.bold("Next:"))
 	fmt.Fprintln(w, "  Fix the failures above and run:")
 	fmt.Fprintln(w, "    cc-bash-guard verify")
@@ -82,7 +78,18 @@ func writeVerifySummary(w io.Writer, result app.VerifyResult, artifactStatus str
 	fmt.Fprintf(w, "  config files: %d\n", result.Summary.ConfigFiles)
 	fmt.Fprintf(w, "  permission rules: %d\n", result.Summary.PermissionRules)
 	fmt.Fprintf(w, "  tests: %d\n", result.Summary.Tests)
+	fmt.Fprintf(w, "  warnings: %s\n", warningCountText(colorScheme{}, result.Summary.Warnings))
 	fmt.Fprintf(w, "  artifact: %s\n", artifactStatus)
+}
+
+func writeVerifyWarnings(w io.Writer, result app.VerifyResult, color colorScheme) {
+	if len(result.Warnings) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\n%s warnings: %d\n\n", color.yellow(color.bold("WARN")), len(result.Warnings))
+	for i, warning := range result.Warnings {
+		writeVerifyDiagnostic(w, color, "Warning", i+1, warning)
+	}
 }
 
 func warningCountText(color colorScheme, count int) string {
@@ -103,6 +110,9 @@ func writeVerifyDiagnostic(w io.Writer, color colorScheme, label string, index i
 	}
 	if d.Input != "" {
 		fmt.Fprintf(w, "  input: %s\n", d.Input)
+	}
+	if d.Pattern != "" {
+		fmt.Fprintf(w, "  pattern: %s\n", d.Pattern)
 	}
 	if d.Expected != "" {
 		fmt.Fprintf(w, "  expected: %s\n", decisionText(color, d.Expected))
@@ -165,6 +175,11 @@ func writeVerifyDiagnostic(w io.Writer, color colorScheme, label string, index i
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "  Hint:")
 		fmt.Fprintf(w, "    %s\n", d.Hint)
+	}
+	if d.SaferAlternative != "" {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "  Safer alternative:")
+		fmt.Fprintf(w, "    %s\n", d.SaferAlternative)
 	}
 	fmt.Fprintln(w)
 }
