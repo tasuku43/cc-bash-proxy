@@ -143,6 +143,8 @@ Output:
   decisions, final reason, source decisions, and matched rule source when known.
   JSON output includes ok, summary, failures, and warnings. JSON never contains
   ANSI color. NO_COLOR and TERM=dumb disable color for human output.
+  Use top-level test entries to cover both allowed examples and near misses,
+  especially for patterns fallback rules. See docs/user/EXAMPLES.md.
 
 Semantic diagnostics:
   Unsupported semantic fields and invalid semantic types include the command,
@@ -286,7 +288,7 @@ Example:
 
       - name: read-only basics
         patterns:
-          - "^ls(\\s|$)"
+          - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|$()]+$"
           - "^pwd$"
 
 Docs:
@@ -359,7 +361,7 @@ Read-only shell basics:
     allow:
       - name: read-only shell basics
         patterns:
-          - "^ls(\\s|$)"
+          - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|$()]+$"
           - "^pwd$"
 
 Unknown command fallback:
@@ -368,6 +370,19 @@ Unknown command fallback:
       - name: tool preview
         patterns:
           - "^my-tool\\s+preview(\\s|$)"
+
+Safe patterns fallback:
+  permission:
+    allow:
+      - name: terraform read-only fallback
+        patterns:
+          - "^terraform\\s+(plan|show)(\\s|$)[^;&|$()]*$"
+
+  test:
+    - in: "terraform plan -out=tfplan"
+      decision: allow
+    - in: "terraform apply -auto-approve"
+      decision: ask
 
 Docs:
   docs/user/EXAMPLES.md
@@ -395,7 +410,7 @@ Unsupported semantic field:
 
 Command has no semantic schema:
   Use patterns for raw regex rules. Semantic matching only works for commands
-  listed by cc-bash-guard help semantic.
+  listed by cc-bash-guard help semantic. Prefer semantic rules when available.
 
 All permission sources abstained:
   The final result is ask. Add an allow, ask, or deny rule when you want an
@@ -404,6 +419,11 @@ All permission sources abstained:
 Regex pattern not matching:
   patterns match the raw command string. Anchor carefully and escape backslashes
   for YAML double-quoted strings, or use single-quoted YAML strings.
+
+Broad pattern allow rules:
+  Avoid broad allow patterns such as .*, ^aws\\s+, ^terraform\\s+, or ^npm\\s+.
+  Allowed commands may invoke scripts, plugins, or subcommands that are not
+  deeply inspected. Add top-level tests and run cc-bash-guard verify.
 
 AWS profile style:
   Prefer AWS_PROFILE=myprof aws eks list-clusters in project guidance. The AWS

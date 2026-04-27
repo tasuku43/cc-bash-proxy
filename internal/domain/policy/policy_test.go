@@ -263,12 +263,12 @@ func TestEvaluateReadOnlyCommandsUsePatterns(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
 			Allow: []PermissionRuleSpec{{
-				Patterns: []string{`^ls(\s|$)`, `^pwd$`},
+				Patterns: []string{"^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|`$()]+$", `^pwd$`},
 			}},
 		},
 	}, Source{})
 
-	for _, command := range []string{"ls -la", "pwd"} {
+	for _, command := range []string{"ls -la internal", "pwd"} {
 		t.Run(command, func(t *testing.T) {
 			got, err := Evaluate(p, command)
 			if err != nil {
@@ -278,6 +278,78 @@ func TestEvaluateReadOnlyCommandsUsePatterns(t *testing.T) {
 				t.Fatalf("Outcome = %q, want allow; decision=%+v", got.Outcome, got)
 			}
 		})
+	}
+}
+
+func TestEvaluateSafePatternFallbackExamples(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Name:     "terraform read-only fallback",
+				Patterns: []string{"^terraform\\s+(plan|show)(\\s|$)[^;&|`$()]*$"},
+			}},
+		},
+	}, Source{})
+
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{command: "terraform plan -out=tfplan", want: "allow"},
+		{command: "terraform show tfplan", want: "allow"},
+		{command: "terraform apply -auto-approve", want: "abstain"},
+		{command: "terraform plan; terraform apply -auto-approve", want: "ask"},
+		{command: "terraform plan $(echo tfplan)", want: "ask"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			got, err := Evaluate(p, tt.command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != tt.want {
+				t.Fatalf("Outcome = %q, want %q; decision=%+v", got.Outcome, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestEvaluateBroadPatternAllowDocumentsResidualRisk(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Name:     "too broad terraform fallback",
+				Patterns: []string{`^terraform\s+`},
+			}},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "terraform apply -auto-approve")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "allow" {
+		t.Fatalf("Outcome = %q, want allow; decision=%+v", got.Outcome, got)
+	}
+}
+
+func TestEvaluateScriptRunnerPatternAllowDoesNotInspectScriptBody(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Name:     "npm lint script",
+				Patterns: []string{`^npm\s+run\s+lint$`},
+			}},
+		},
+	}, Source{})
+
+	got, err := Evaluate(p, "npm run lint")
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Outcome != "allow" {
+		t.Fatalf("Outcome = %q, want allow; decision=%+v", got.Outcome, got)
 	}
 }
 

@@ -147,6 +147,7 @@ func TestHelpPermissionExplainsCurrentSchema(t *testing.T) {
 		"Use patterns for commands without semantic support",
 		"Put rules under permission.deny",
 		"Do not combine command and patterns",
+		"^ls(\\\\s+-[A-Za-z0-9]+)?\\\\s+[^;&|$()]+$",
 		"permission:",
 		"docs/user/PERMISSION_SCHEMA.md",
 	} {
@@ -172,6 +173,40 @@ func TestHelpConfigSeparatesRuleAndTopLevelTests(t *testing.T) {
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("help config missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestHelpVerifyReferencesPatternExamplesAndTests(t *testing.T) {
+	code, stdout, stderr := runCLIHelpTest("help", "verify")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr)
+	}
+	for _, want := range []string{
+		"Use top-level test entries",
+		"patterns fallback rules",
+		"docs/user/EXAMPLES.md",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("help verify missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestHelpExamplesShowsSafePatternFallback(t *testing.T) {
+	code, stdout, stderr := runCLIHelpTest("help", "examples")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr)
+	}
+	for _, want := range []string{
+		"Safe patterns fallback:",
+		"terraform read-only fallback",
+		"^terraform\\\\s+(plan|show)(\\\\s|$)[^;&|$()]*$",
+		"terraform apply -auto-approve",
+		"decision: ask",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("help examples missing %q:\n%s", want, stdout)
 		}
 	}
 }

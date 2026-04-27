@@ -50,7 +50,7 @@ permission:
 
     - name: read-only shell basics
       patterns:
-        - "^ls(\\s|$)"
+        - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|`$()]+$"
         - "^pwd$"
 ```
 

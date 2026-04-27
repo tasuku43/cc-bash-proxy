@@ -145,8 +145,9 @@ permission:
   allow:
     - name: read-only shell basics
       patterns:
-        - "^ls(\\s|$)"
+        - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|`$()]+$"
         - "^pwd$"
+        - "^cat\\s+[^;&|`$()]+$"
 ```
 
 ## Unknown Command Fallback
@@ -160,3 +161,32 @@ permission:
       patterns:
         - "^my-tool\\s+preview(\\s|$)"
 ```
+
+## Safe Pattern Fallback
+
+Prefer `command` plus `command.semantic` for commands listed by
+`cc-bash-guard help semantic`. For commands without semantic support, anchor
+regexes, allow only intended subcommands, and add top-level tests for commands
+that must remain `ask`.
+
+```yaml
+permission:
+  allow:
+    - name: terraform read-only fallback
+      patterns:
+        - "^terraform\\s+(plan|show)(\\s|$)[^;&|`$()]*$"
+
+test:
+  - in: "terraform plan -out=tfplan"
+    decision: allow
+  - in: "terraform show tfplan"
+    decision: allow
+  - in: "terraform apply -auto-approve"
+    decision: ask
+  - in: "terraform plan; terraform apply -auto-approve"
+    decision: ask
+```
+
+Avoid broad allow rules such as `.*`, `^terraform\\s+`, or `^npm\\s+`. They can
+allow destructive subcommands or commands that invoke scripts and plugins that
+cc-bash-guard does not deeply inspect.

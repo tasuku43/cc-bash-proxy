@@ -108,13 +108,47 @@ evaluation, so a pattern such as `^aws(\s|$)` also matches
 `bash -c 'aws s3 ls'`. This is the fallback for commands without semantic
 support.
 
+Prefer `command` plus `command.semantic` when a command is listed by
+`cc-bash-guard help semantic`. Pattern rules are best used for commands that do
+not have semantic parsers, or for deliberate raw-string checks.
+
 ```yaml
 permission:
   allow:
     - name: read-only shell basics
       patterns:
-        - "^ls(\\s|$)"
+        - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|`$()]+$"
         - "^pwd$"
+        - "^cat\\s+[^;&|`$()]+$"
+```
+
+Safer pattern rules are narrow and test-backed:
+
+- anchor with `^` and `$`, or use explicit token boundaries such as `(\\s|$)`
+- allow only intended subcommands, not an entire tool namespace
+- avoid broad allow patterns such as `.*`, `^aws\\s+`, `^terraform\\s+`, or
+  `^npm\\s+`
+- account for shell metacharacters such as `;`, `&`, `|`, backticks, `$()`,
+  redirects, subshells, and process substitution
+- remember that allowed commands can invoke scripts, plugins, or subcommands
+  that are not deeply inspected, such as `npm run lint` or `make test`
+
+Example fallback for a command without semantic support:
+
+```yaml
+permission:
+  allow:
+    - name: terraform read-only fallback
+      patterns:
+        - "^terraform\\s+(plan|show)(\\s|$)[^;&|`$()]*$"
+
+test:
+  - in: "terraform plan -out=tfplan"
+    decision: allow
+  - in: "terraform apply -auto-approve"
+    decision: ask
+  - in: "terraform plan; terraform apply -auto-approve"
+    decision: ask
 ```
 
 ## Valid Combinations

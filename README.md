@@ -217,11 +217,50 @@ permission:
   allow:
     - name: read-only shell basics
       patterns:
-        - "^ls(\\s|$)"
+        - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|`$()]+$"
         - "^pwd$"
         - "^cat\\s+[^;&|`$()]+$"
-        - "^head\\s+"
-        - "^tail\\s+"
+        - "^head\\s+[^;&|`$()]+$"
+        - "^tail\\s+[^;&|`$()]+$"
+```
+
+### Safe Pattern Rules
+
+`patterns` are a fallback for commands that do not have command-specific
+semantic parsers. Prefer `command` plus `command.semantic` for supported tools
+such as `git`, `gh`, `aws`, `kubectl`, `helmfile`, and `argocd`; those rules
+can distinguish read-only operations from destructive ones.
+
+When you do need `patterns`, keep them narrow:
+
+- anchor regexes with `^` and `$`, or with explicit token boundaries such as
+  `(\\s|$)`
+- allow only the subcommands you intend, as in the Terraform example below
+- avoid broad allow patterns such as `.*`, `^aws\\s+`, `^terraform\\s+`, or
+  `^npm\\s+`
+- account for shell metacharacters such as `;`, `&`, `|`, backticks, `$()`,
+  redirects, subshells, and process substitution
+- remember that an allowed command can invoke scripts, plugins, or subcommands
+  that cc-bash-guard does not deeply inspect, such as `npm run lint` or
+  `make test`
+
+Use top-level `test` entries with `cc-bash-guard verify` to pin both safe and
+unsafe examples:
+
+```yaml
+permission:
+  allow:
+    - name: terraform read-only fallback
+      patterns:
+        - "^terraform\\s+(plan|show)(\\s|$)[^;&|`$()]*$"
+
+test:
+  - in: "terraform plan -out=tfplan"
+    decision: allow
+  - in: "terraform apply -auto-approve"
+    decision: ask
+  - in: "terraform plan; terraform apply -auto-approve"
+    decision: ask
 ```
 
 ## AWS Style

@@ -110,6 +110,7 @@ cc-bash-guard help semantic
 ```
 
 Use `patterns` for raw regex rules when a command has no semantic schema.
+Prefer semantic rules when they are available.
 
 ## Final Result Is ask
 
@@ -144,6 +145,32 @@ permission:
 
 In YAML double-quoted strings, escape backslashes. Single-quoted YAML strings
 can be easier for complex regular expressions.
+
+## Broad Pattern Allow Rules
+
+Avoid broad allow patterns such as `.*`, `^aws\\s+`, `^terraform\\s+`, or
+`^npm\\s+`. They can allow destructive subcommands, and allowed commands can
+invoke scripts, plugins, or subcommands that cc-bash-guard does not deeply
+inspect.
+
+Use `cc-bash-guard verify` with top-level tests that cover allowed examples and
+near misses:
+
+```yaml
+permission:
+  allow:
+    - name: terraform read-only fallback
+      patterns:
+        - "^terraform\\s+(plan|show)(\\s|$)[^;&|`$()]*$"
+
+test:
+  - in: "terraform plan -out=tfplan"
+    decision: allow
+  - in: "terraform apply -auto-approve"
+    decision: ask
+  - in: "terraform plan; terraform apply -auto-approve"
+    decision: ask
+```
 
 ## AWS Profile Style
 
