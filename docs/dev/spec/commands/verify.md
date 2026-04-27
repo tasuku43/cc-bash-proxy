@@ -25,7 +25,7 @@ part of the execution path?**
 - run rewrite tests, permission rule tests, and top-level E2E tests against the
   effective merged state
 - compile and write a tool-specific verified hook artifact
-- require build metadata to be visible in the current binary
+- report missing build metadata as a warning, not as a verification failure
 - for Claude, fail if Claude Code settings exist but do not point at
   `cc-bash-guard hook`
 - for Claude, fail if Claude Code settings use `cc-bash-guard hook` via PATH lookup
@@ -44,24 +44,37 @@ is present, that condition should remain informational rather than fatal.
 
 The default output should include:
 
-- the running version
-- the target tool
-- the visible VCS revision or an explicit missing marker
-- the underlying doctor-style checks
-- a final verified true/false result
-- the artifact cache paths when verification also produced executable hook artifacts
+- `PASS verify` or `FAIL verify`
+- loaded config file count
+- permission rule count
+- test count
+- artifact status
+- source-aware failures with YAML file, section, bucket, index, and rule name
+  when available
+- E2E failure details: input, expected decision, actual decision, final reason,
+  source decisions, and matched rule
+- semantic validation details: command, field, expected/actual type when
+  applicable, supported fields, and a help hint
+- a separate warnings section
+
+Human output may use color for terminal output. Color must be disabled for JSON,
+`NO_COLOR`, `TERM=dumb`, and non-terminal output when color mode is `auto`.
 
 ### JSON
 
 `cc-bash-guard verify --format json` should expose:
 
-- `verified`
+- `ok`
 - `tool`
 - `build_info`
-- `report`
+- `summary`
 - `failures`
+- `warnings`
+- `report`
 - `artifact_built`
 - `artifact_cache`
+
+JSON diagnostics must be deterministic and must not contain ANSI color.
 
 ## Relationship To `doctor`
 

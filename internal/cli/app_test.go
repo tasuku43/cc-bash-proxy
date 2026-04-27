@@ -1619,6 +1619,412 @@ func TestVerifyStatus(t *testing.T) {
 	}
 }
 
+func TestRunVerifyHumanSuccessSummaryNoColorForBuffer(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: git status
+      command:
+        name: git
+        semantic:
+          verb: status
+      test:
+        allow: ["git status"]
+        pass: ["git diff"]
+test:
+  - in: "git status"
+    decision: allow
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"PASS verify", "config files:", "permission rules: 1", "tests: 1", "artifact:"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out)
+		}
+	}
+	if hasANSI(out) {
+		t.Fatalf("stdout contains ANSI escapes: %q", out)
+	}
+}
+
+func TestRunVerifyColorBehavior(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: git status
+      command:
+        name: git
+        semantic:
+          verb: status
+      test:
+        allow: ["git status"]
+        pass: ["git diff"]
+test:
+  - in: "git status"
+    decision: allow
+`)
+	t.Setenv("TERM", "xterm")
+	t.Setenv("NO_COLOR", "")
+	var colored bytes.Buffer
+	code := Run([]string{"verify", "--color", "always"}, Streams{Stdout: &colored, Stderr: &bytes.Buffer{}}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s", code, colored.String())
+	}
+	if !hasANSI(colored.String()) {
+		t.Fatalf("stdout missing ANSI escapes: %q", colored.String())
+	}
+
+	t.Setenv("NO_COLOR", "1")
+	var noColor bytes.Buffer
+	code = Run([]string{"verify", "--color", "always"}, Streams{Stdout: &noColor, Stderr: &bytes.Buffer{}}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s", code, noColor.String())
+	}
+	if hasANSI(noColor.String()) {
+		t.Fatalf("NO_COLOR output contains ANSI escapes: %q", noColor.String())
+	}
+
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "dumb")
+	var dumb bytes.Buffer
+	code = Run([]string{"verify", "--color", "always"}, Streams{Stdout: &dumb, Stderr: &bytes.Buffer{}}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s", code, dumb.String())
+	}
+	if hasANSI(dumb.String()) {
+		t.Fatalf("TERM=dumb output contains ANSI escapes: %q", dumb.String())
+	}
+}
+
+func TestRunVerifyE2EFailureDiagnosticsIncludeSourceAndMatchedRule(t *testing.T) {
+	cwd := t.TempDir()
+	writeProjectConfig(t, cwd, `permission:
+  deny:
+    - name: git force push
+      command:
+        name: git
+        semantic:
+          verb: push
+          force: true
+      message: force push is blocked
+      test:
+        deny: ["git push --force origin main"]
+        pass: ["git status"]
+test:
+  - in: "git push --force origin main"
+    decision: ask
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: cwd, Home: t.TempDir()})
+	if code == 0 {
+		t.Fatalf("code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"FAIL verify",
+		"E2E test failed",
+		".cc-bash-guard/cc-bash-guard.yaml test[0]",
+		"input: git push --force origin main",
+		"expected: ask",
+		"actual: deny",
+		"cc-bash-guard: deny",
+		"Claude settings: abstain",
+		"matched rule:",
+		"permission.deny[0] \"git force push\"",
+		"message: force push is blocked",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunVerifySemanticDiagnostics(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "unsupported field",
+			body: `permission:
+  deny:
+    - name: bad git field
+      command:
+        name: git
+        semantic:
+          namespace: prod
+      test:
+        deny: ["git push"]
+        pass: ["git status"]
+`,
+			want: []string{"Unsupported semantic field", "command: git", "field: command.semantic.namespace", "Supported fields for git:", "cc-bash-guard help semantic git"},
+		},
+		{
+			name: "unsupported type",
+			body: `permission:
+  deny:
+    - name: bad git type
+      command:
+        name: git
+        semantic:
+          force: "yes"
+      test:
+        deny: ["git push --force"]
+        pass: ["git status"]
+`,
+			want: []string{"Invalid semantic field type", "command: git", "field: permission.deny[0].command.semantic.force", "expected: bool", "actual: string", "cc-bash-guard help semantic git"},
+		},
+		{
+			name: "schema unavailable",
+			body: `permission:
+  ask:
+    - name: helm semantic
+      command:
+        name: helm
+        semantic:
+          namespace: prod
+      test:
+        ask: ["helm list"]
+        pass: ["git status"]
+`,
+			want: []string{"Semantic schema unavailable", "command: helm", "field: command.semantic", "Use patterns for commands without semantic support"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeUserConfig(t, home, tt.body)
+			var stdout, stderr bytes.Buffer
+			code := Run([]string{"verify"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: t.TempDir(), Home: home})
+			if code == 0 {
+				t.Fatalf("code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())
+			}
+			out := stdout.String()
+			for _, want := range tt.want {
+				if !strings.Contains(out, want) {
+					t.Fatalf("stdout missing %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
+func TestRunVerifyJSONFailureOutput(t *testing.T) {
+	cwd := t.TempDir()
+	writeProjectConfig(t, cwd, `permission:
+  deny:
+    - name: git force push
+      command:
+        name: git
+        semantic:
+          verb: push
+          force: true
+      message: force push is blocked
+      test:
+        deny: ["git push --force origin main"]
+        pass: ["git status"]
+test:
+  - in: "git push --force origin main"
+    decision: ask
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify", "--format", "json", "--color", "always"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: cwd, Home: t.TempDir()})
+	if code == 0 {
+		t.Fatalf("code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if hasANSI(stdout.String()) {
+		t.Fatalf("JSON contains ANSI escapes: %q", stdout.String())
+	}
+	var payload struct {
+		OK      bool `json:"ok"`
+		Summary struct {
+			ConfigFiles     int `json:"config_files"`
+			PermissionRules int `json:"permission_rules"`
+			Tests           int `json:"tests"`
+			Failures        int `json:"failures"`
+			Warnings        int `json:"warnings"`
+		} `json:"summary"`
+		Failures []struct {
+			Kind     string `json:"kind"`
+			Input    string `json:"input"`
+			Expected string `json:"expected"`
+			Actual   string `json:"actual"`
+			Source   struct {
+				File    string `json:"file"`
+				Section string `json:"section"`
+				Index   int    `json:"index"`
+			} `json:"source"`
+			MatchedRule struct {
+				File   string `json:"file"`
+				Bucket string `json:"bucket"`
+				Index  int    `json:"index"`
+				Name   string `json:"name"`
+			} `json:"matched_rule"`
+		} `json:"failures"`
+		Warnings []any `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v stdout=%s", err, stdout.String())
+	}
+	if payload.OK || payload.Summary.PermissionRules != 1 || payload.Summary.Tests != 1 || len(payload.Failures) == 0 {
+		t.Fatalf("payload=%+v", payload)
+	}
+	f := payload.Failures[0]
+	if f.Kind != "e2e_test_failed" || f.Expected != "ask" || f.Actual != "deny" || f.MatchedRule.Name != "git force push" || f.MatchedRule.Bucket != "deny" {
+		t.Fatalf("failure=%+v", f)
+	}
+}
+
+func TestRunVerifyDuplicateRuleNameWarningJSON(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: git read-only
+      command:
+        name: git
+        semantic:
+          verb: status
+      test:
+        allow: ["git status"]
+        pass: ["git diff"]
+    - name: git read-only
+      command:
+        name: git
+        semantic:
+          verb: diff
+      test:
+        allow: ["git diff"]
+        pass: ["git status"]
+test:
+  - in: "git status"
+    decision: allow
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify", "--format", "json"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		OK       bool `json:"ok"`
+		Warnings []struct {
+			Kind   string           `json:"kind"`
+			First  app.VerifySource `json:"first"`
+			Second app.VerifySource `json:"second"`
+		} `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v stdout=%s", err, stdout.String())
+	}
+	if !payload.OK || len(payload.Warnings) == 0 || payload.Warnings[0].Kind != "duplicate_rule_name" {
+		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestRunVerifyAllFailuresJSON(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  deny:
+    - name: deny rm
+      command:
+        name: rm
+      test:
+        deny: ["rm -rf /tmp/x"]
+        pass: ["git status"]
+test:
+  - in: "rm -rf /tmp/x"
+    decision: ask
+  - in: "rm -rf /tmp/y"
+    decision: ask
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify", "--format", "json", "--all-failures"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: t.TempDir(), Home: home})
+	if code == 0 {
+		t.Fatalf("code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	var payload struct {
+		Failures []struct {
+			Kind string `json:"kind"`
+		} `json:"failures"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v stdout=%s", err, stdout.String())
+	}
+	count := 0
+	for _, failure := range payload.Failures {
+		if failure.Kind == "e2e_test_failed" {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("e2e failure count = %d payload=%+v", count, payload)
+	}
+}
+
+func TestRunVerifyIncludedSourceMetadata(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.Mkdir(filepath.Join(cwd, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(cwd, ".cc-bash-guard")
+	policyPath := filepath.Join(configDir, "policies", "git.yml")
+	testPath := filepath.Join(configDir, "tests", "git.yml")
+	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(testPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(policyPath, []byte(`permission:
+  deny:
+    - name: git force push
+      command:
+        name: git
+        semantic:
+          verb: push
+          force: true
+      test:
+        deny: ["git push --force origin main"]
+        pass: ["git status"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(testPath, []byte(`test:
+  - in: "git push --force origin main"
+    decision: ask
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectConfig(t, cwd, `include:
+  - ./policies/git.yml
+  - ./tests/git.yml
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: cwd, Home: t.TempDir()})
+	if code == 0 {
+		t.Fatalf("code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		".cc-bash-guard/tests/git.yml test[0]",
+		".cc-bash-guard/policies/git.yml permission.deny[0] \"git force push\"",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRunInitCreatesStarterConfig(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
@@ -1638,6 +2044,10 @@ func TestRunInitCreatesStarterConfig(t *testing.T) {
 	if !strings.Contains(string(data), "permission:") {
 		t.Fatalf("config=%q", string(data))
 	}
+}
+
+func hasANSI(s string) bool {
+	return strings.Contains(s, "\x1b[")
 }
 
 func writeUserConfig(t *testing.T, home string, body string) {

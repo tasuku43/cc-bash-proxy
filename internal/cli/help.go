@@ -126,11 +126,28 @@ cc-bash-guard policy disagree with expected E2E outcomes, or when build metadata
 missing.
 
 Usage:
-  cc-bash-guard verify [--format json]
+  cc-bash-guard verify [--format json] [--color auto|always|never] [--all-failures]
+
+Options:
+  --format json              print structured diagnostics for tooling
+  --color auto|always|never  colorize human output; default is auto
+  --all-failures             collect all validation and E2E failures
 
 Examples:
   cc-bash-guard verify
   cc-bash-guard verify --format json
+
+Output:
+  Human output starts with PASS verify or FAIL verify, then a compact summary.
+  Failures include source YAML path, test or rule index, expected and actual
+  decisions, final reason, source decisions, and matched rule source when known.
+  JSON output includes ok, summary, failures, and warnings. JSON never contains
+  ANSI color. NO_COLOR and TERM=dumb disable color for human output.
+
+Semantic diagnostics:
+  Unsupported semantic fields and invalid semantic types include the command,
+  field, supported fields, and a hint such as:
+    cc-bash-guard help semantic git
 `)
 	case "hook":
 		fmt.Fprint(w, `cc-bash-guard hook

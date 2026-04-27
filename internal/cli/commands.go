@@ -126,31 +126,31 @@ func runVerify(args []string, streams Streams, env Env) int {
 		writeCommandHelp(streams.Stdout, "verify")
 		return exitAllow
 	}
-	format, rest, err := parseCommonFlags(args)
+	format, colorMode, allFailures, rest, err := parseVerifyFlags(args)
 	if err != nil || len(rest) != 0 {
 		writeCommandHelp(streams.Stderr, "verify")
 		return exitError
 	}
 
-	result := app.RunVerify(env)
+	result := app.RunVerifyWithOptions(env, app.VerifyOptions{AllFailures: allFailures})
 	if format == "json" {
 		payload := map[string]any{
-			"verified":       result.Verified,
+			"ok":             result.Verified,
 			"tool":           result.Tool,
 			"build_info":     result.BuildInfo,
-			"report":         result.Report,
+			"summary":        result.Summary,
+			"failures":       result.Diagnostics,
+			"warnings":       result.Warnings,
 			"artifact_built": result.ArtifactBuilt,
 			"artifact_cache": result.ArtifactCache,
-		}
-		if len(result.Failures) > 0 {
-			payload["failures"] = result.Failures
+			"report":         result.Report,
 		}
 		if err := writeIndentedJSON(streams.Stdout, payload); err != nil {
 			writeErr(streams.Stderr, err.Error())
 			return exitError
 		}
 	} else {
-		writeVerifyText(streams.Stdout, result)
+		writeVerifyText(streams.Stdout, result, colorFor(streams.Stdout, colorMode))
 	}
 
 	if !result.Verified {

@@ -62,6 +62,20 @@ Run verify after editing policy:
 cc-bash-guard verify
 ```
 
+`verify` prints `PASS verify` with counts for loaded config files, permission
+rules, tests, and artifact status. On failure it shows the source YAML file,
+expected and actual decision, why the final decision was reached, and the
+matched rule when available.
+
+For tooling, use structured output:
+
+```sh
+cc-bash-guard verify --format json
+```
+
+Human output uses `--color auto` by default. `NO_COLOR`, `TERM=dumb`, or
+`--color never` disable color.
+
 Use doctor for installation and configuration diagnostics:
 
 ```sh

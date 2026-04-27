@@ -15,6 +15,54 @@ If your config uses `include`, every included YAML file is part of the verified
 artifact. Editing an included policy or test file makes the artifact stale; run
 `cc-bash-guard verify` again.
 
+## Reading Verify Output
+
+Human output starts with a compact summary:
+
+```text
+PASS verify
+  config files: 4
+  permission rules: 28
+  tests: 42
+  artifact: updated
+```
+
+On failure, `verify` prints each failure with source-aware context. For an E2E
+test failure, check:
+
+- `source`: YAML file and `test[index]`
+- `input`: command under test
+- `expected` and `actual`: final permission decisions
+- `decisions`: cc-bash-guard policy, Claude settings, and final merged decision
+- `matched rule`: YAML file, bucket, index, name, and message when available
+
+Warnings are shown separately from failures. Duplicate rule names and broad
+env-only allow rules are warnings; they do not fail verification by themselves.
+
+Use JSON output for tooling:
+
+```sh
+cc-bash-guard verify --format json
+```
+
+The JSON payload includes `ok`, `summary`, `failures`, and `warnings`. It never
+contains ANSI color codes.
+
+Human output uses color only when appropriate. The default is `--color auto`,
+which enables color on terminals and disables it for pipes. `NO_COLOR` and
+`TERM=dumb` disable color. You can also use:
+
+```sh
+cc-bash-guard verify --color always
+cc-bash-guard verify --color never
+```
+
+To collect every failure instead of stopping after the first E2E failure, run:
+
+```sh
+cc-bash-guard verify --all-failures
+```
+
 ## Include Errors
 
 Common include failures:
@@ -39,6 +87,13 @@ cc-bash-guard semantic-schema git --format json
 
 If verify reports an unknown key, use the current permission shape:
 `command`, `env`, and `patterns`.
+
+Verify reports the invalid semantic field, command name, source YAML location,
+supported fields for that command, and a help hint. For example:
+
+```sh
+cc-bash-guard help semantic git
+```
 
 ## Command Without Semantic Support
 

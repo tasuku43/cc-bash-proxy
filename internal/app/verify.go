@@ -1,16 +1,23 @@
 package app
 
 import (
+	"errors"
+	"regexp"
 	"strings"
 
 	"github.com/tasuku43/cc-bash-guard/internal/adapter/claude"
 	"github.com/tasuku43/cc-bash-guard/internal/app/doctoring"
 	"github.com/tasuku43/cc-bash-guard/internal/domain/policy"
+	semanticpkg "github.com/tasuku43/cc-bash-guard/internal/domain/semantic"
 	"github.com/tasuku43/cc-bash-guard/internal/infra/buildinfo"
 	configrepo "github.com/tasuku43/cc-bash-guard/internal/infra/config"
 )
 
 func RunVerify(env Env) VerifyResult {
+	return RunVerifyWithOptions(env, VerifyOptions{})
+}
+
+func RunVerifyWithOptions(env Env, opts VerifyOptions) VerifyResult {
 	tool := claude.Tool
 	inputs := configrepo.ResolveEffectiveInputs(env.Cwd, env.Home, env.XDGConfigHome, tool)
 	loaded := configrepo.LoadEffectiveForTool(env.Cwd, env.Home, env.XDGConfigHome, tool)
@@ -24,16 +31,34 @@ func RunVerify(env Env) VerifyResult {
 	artifactBuilt := false
 	permissionRules := len(loaded.Pipeline.Permission.Deny) + len(loaded.Pipeline.Permission.Ask) + len(loaded.Pipeline.Permission.Allow)
 	tests := len(loaded.Pipeline.Test)
+	failures := verifyFailures(loaded, tool, env.Cwd, env.Home, opts.AllFailures)
+	warnings := verifyWarnings(loaded)
+	for _, reason := range reasons {
+		if !diagnosticMessageExists(failures, reason) {
+			failures = append(failures, VerifyDiagnostic{Kind: "verify_check_failed", Title: "Verify check failed", Message: reason})
+		}
+	}
 	if ok {
 		rules, err := configrepo.VerifyEffectiveToAllCaches(env.Cwd, env.Home, env.XDGConfigHome, env.XDGCacheHome, tool, info.Version)
 		if err != nil {
 			ok = false
 			reasons = append(reasons, err.Error())
+			failures = append(failures, VerifyDiagnostic{Kind: "artifact_write_failed", Title: "Artifact write failed", Message: err.Error()})
 		} else if len(rules.Rewrite) > 0 || !policy.IsZeroPermissionSpec(rules.Permission) || len(rules.Test) > 0 {
 			artifactBuilt = true
 			permissionRules = len(rules.Permission.Deny) + len(rules.Permission.Ask) + len(rules.Permission.Allow)
 			tests = len(rules.Test)
 		}
+	}
+	if len(failures) > 0 {
+		ok = false
+	}
+	summary := VerifySummary{
+		ConfigFiles:     len(inputs.ConfigFiles),
+		PermissionRules: permissionRules,
+		Tests:           tests,
+		Failures:        len(failures),
+		Warnings:        len(warnings),
 	}
 
 	return VerifyResult{
@@ -45,8 +70,21 @@ func RunVerify(env Env) VerifyResult {
 		ArtifactCache:   configrepo.HookCacheDirs(env.Home, env.XDGCacheHome),
 		PermissionRules: permissionRules,
 		Tests:           tests,
+		ConfigFiles:     len(inputs.ConfigFiles),
 		Failures:        reasons,
+		Diagnostics:     failures,
+		Warnings:        warnings,
+		Summary:         summary,
 	}
+}
+
+func diagnosticMessageExists(diags []VerifyDiagnostic, message string) bool {
+	for _, diag := range diags {
+		if diag.Message == message || strings.Contains(message, diag.Message) || strings.Contains(diag.Message, message) {
+			return true
+		}
+	}
+	return false
 }
 
 func VerifyStatus(report doctoring.Report, info buildinfo.Info, tool string) (bool, []string) {
@@ -67,9 +105,257 @@ func VerifyStatus(report doctoring.Report, info buildinfo.Info, tool string) (bo
 			reasons = append(reasons, check.ID+": "+check.Message)
 		}
 	}
-	if info.VCSRevision == "" {
-		reasons = append(reasons, "build metadata missing: prefer a binary built with embedded VCS info")
-	}
-
 	return len(reasons) == 0, reasons
+}
+
+func verifyFailures(loaded configrepo.Loaded, tool string, cwd string, home string, all bool) []VerifyDiagnostic {
+	var failures []VerifyDiagnostic
+	for _, err := range loaded.Errors {
+		failures = append(failures, diagnosticsFromError(err)...)
+	}
+	if len(loaded.Errors) > 0 {
+		return failures
+	}
+	for _, failure := range doctoring.CollectTestFailures(loaded.Pipeline, tool, cwd, home, all) {
+		failures = append(failures, diagnosticFromTestFailure(failure))
+	}
+	return failures
+}
+
+func verifyWarnings(loaded configrepo.Loaded) []VerifyDiagnostic {
+	var warnings []VerifyDiagnostic
+	for _, rule := range loaded.Pipeline.Permission.Allow {
+		if policy.IsZeroPermissionCommandSpec(rule.Command) && len(rule.Patterns) == 0 && !policy.IsZeroPermissionEnvSpec(rule.Env) {
+			warnings = append(warnings, VerifyDiagnostic{
+				Kind:    "env_only_allow_rule",
+				Title:   "env-only allow rule",
+				Source:  sourceFromPolicy(rule.Source, rule.Name),
+				Message: "env-only allow can allow any command when env matches",
+			})
+		}
+	}
+	warnings = append(warnings, duplicateRuleNameWarnings(loaded.Pipeline)...)
+	return warnings
+}
+
+func duplicateRuleNameWarnings(p policy.Pipeline) []VerifyDiagnostic {
+	type seenRule struct {
+		source policy.Source
+		name   string
+	}
+	seen := map[string]seenRule{}
+	var warnings []VerifyDiagnostic
+	visit := func(rules []policy.PermissionRuleSpec) {
+		for _, rule := range rules {
+			name := strings.TrimSpace(rule.Name)
+			if name == "" {
+				continue
+			}
+			if first, ok := seen[name]; ok {
+				warnings = append(warnings, VerifyDiagnostic{
+					Kind:    "duplicate_rule_name",
+					Title:   "Duplicate rule name",
+					Message: "duplicate permission rule name: " + name,
+					First:   sourceFromPolicy(first.source, first.name),
+					Second:  sourceFromPolicy(rule.Source, rule.Name),
+				})
+				continue
+			}
+			seen[name] = seenRule{source: rule.Source, name: name}
+		}
+	}
+	visit(p.Permission.Deny)
+	visit(p.Permission.Ask)
+	visit(p.Permission.Allow)
+	return warnings
+}
+
+func diagnosticFromTestFailure(f doctoring.TestFailure) VerifyDiagnostic {
+	d := VerifyDiagnostic{
+		Kind:     "e2e_test_failed",
+		Title:    "E2E test failed",
+		Source:   sourceFromPolicy(f.Source, ""),
+		Input:    f.Example,
+		Expected: f.Expected,
+		Actual:   f.Got,
+		Reason:   f.Reason,
+		Decisions: &VerifyDecisions{
+			Policy:         nonEmpty(f.Policy, "abstain"),
+			ClaudeSettings: nonEmpty(f.Claude, "abstain"),
+			Final:          nonEmpty(f.Final, f.Got),
+		},
+	}
+	if f.MatchedRule != nil {
+		d.MatchedRule = sourceFromPolicy(*f.MatchedRule.Source, f.MatchedRule.Name)
+		d.MatchedMessage = f.MatchedRule.Message
+	}
+	return d
+}
+
+func diagnosticsFromError(err error) []VerifyDiagnostic {
+	var validation *policy.ValidationError
+	if errors.As(err, &validation) {
+		diagnostics := make([]VerifyDiagnostic, 0, len(validation.Issues))
+		for _, issue := range validation.Issues {
+			diagnostics = append(diagnostics, diagnosticFromIssue(issue))
+		}
+		return diagnostics
+	}
+	parts := strings.Split(err.Error(), "; ")
+	diagnostics := make([]VerifyDiagnostic, 0, len(parts))
+	for _, part := range parts {
+		diagnostics = append(diagnostics, diagnosticFromIssue(part))
+	}
+	return diagnostics
+}
+
+func diagnosticFromIssue(issue string) VerifyDiagnostic {
+	d := VerifyDiagnostic{Kind: "validation_error", Title: "Validation error", Message: issue}
+	if src, rest, ok := splitIssueSource(issue); ok {
+		d.Source = sourceFromScope(src, rest, "")
+	}
+	if semantic := semanticUnsupportedFieldDiagnostic(issue); semantic.Kind != "" {
+		return semantic
+	}
+	if semantic := semanticUnsupportedTypeDiagnostic(issue); semantic.Kind != "" {
+		return semantic
+	}
+	if semantic := semanticUnavailableDiagnostic(issue); semantic.Kind != "" {
+		return semantic
+	}
+	return d
+}
+
+var unsupportedFieldRe = regexp.MustCompile(`^(?:(.+) )?(permission\.(deny|ask|allow)\[(\d+)\]\.command\.semantic\.([A-Za-z0-9_]+)) is not supported for command ([^\. ]+)\. Supported semantic fields for [^:]+: ([^\.]+)\.`)
+var unsupportedTypeRe = regexp.MustCompile(`^(?:(.+) )?(permission\.(deny|ask|allow)\[(\d+)\]\.command\.semantic\.([A-Za-z0-9_]+)) must be ([^,]+), got ([^\.]+)\.(?: Command: ([^\.]+)\.)?`)
+var semanticUnavailableRe = regexp.MustCompile(`^(?:(.+) )?(permission\.(deny|ask|allow)\[(\d+)\]\.command\.semantic) is not available for command ([^\. ]+)\.`)
+
+func semanticUnsupportedFieldDiagnostic(issue string) VerifyDiagnostic {
+	m := unsupportedFieldRe.FindStringSubmatch(issue)
+	if len(m) == 0 {
+		return VerifyDiagnostic{}
+	}
+	command := m[6]
+	return VerifyDiagnostic{
+		Kind:            "unsupported_semantic_field",
+		Title:           "Unsupported semantic field",
+		Source:          sourceFromScope(m[1], "permission."+m[3]+"["+m[4]+"]", ""),
+		Message:         "unsupported semantic field",
+		Command:         command,
+		Field:           "command.semantic." + m[5],
+		SupportedFields: semanticpkg.FieldNames(command),
+		Hint:            "cc-bash-guard help semantic " + command,
+	}
+}
+
+func semanticUnsupportedTypeDiagnostic(issue string) VerifyDiagnostic {
+	m := unsupportedTypeRe.FindStringSubmatch(issue)
+	if len(m) == 0 {
+		return VerifyDiagnostic{}
+	}
+	command := m[8]
+	if command == "" {
+		command = commandFromSemanticIssue(issue)
+	}
+	return VerifyDiagnostic{
+		Kind:            "invalid_semantic_field_type",
+		Title:           "Invalid semantic field type",
+		Source:          sourceFromScope(m[1], "permission."+m[3]+"["+m[4]+"]", ""),
+		Message:         "invalid semantic field type",
+		Command:         command,
+		Field:           m[2],
+		ExpectedType:    m[6],
+		ActualType:      m[7],
+		SupportedFields: semanticpkg.FieldNames(command),
+		Hint:            "cc-bash-guard help semantic " + command,
+	}
+}
+
+func semanticUnavailableDiagnostic(issue string) VerifyDiagnostic {
+	m := semanticUnavailableRe.FindStringSubmatch(issue)
+	if len(m) == 0 {
+		return VerifyDiagnostic{}
+	}
+	command := m[5]
+	return VerifyDiagnostic{
+		Kind:    "semantic_schema_unavailable",
+		Title:   "Semantic schema unavailable",
+		Source:  sourceFromScope(m[1], "permission."+m[3]+"["+m[4]+"]", ""),
+		Message: "semantic schema unavailable",
+		Command: command,
+		Field:   "command.semantic",
+		Hint:    "Use patterns for commands without semantic support, or add a semantic parser.",
+	}
+}
+
+func commandFromSemanticIssue(issue string) string {
+	for _, command := range semanticpkg.SupportedCommands() {
+		if strings.Contains(issue, " for command "+command) {
+			return command
+		}
+	}
+	return ""
+}
+
+func splitIssueSource(issue string) (string, string, bool) {
+	idx := strings.Index(issue, " permission.")
+	if idx < 0 {
+		idx = strings.Index(issue, " test[")
+	}
+	if idx < 0 {
+		return "", issue, false
+	}
+	return issue[:idx], issue[idx+1:], true
+}
+
+func sourceFromPolicy(src policy.Source, name string) *VerifySource {
+	if src == (policy.Source{}) && name == "" {
+		return nil
+	}
+	scope := src.Section
+	if scope != "" && !strings.Contains(scope, "[") {
+		scope += "[" + itoa(src.Index) + "]"
+	}
+	return sourceFromScope(src.Path, scope, name)
+}
+
+var scopeRe = regexp.MustCompile(`^(permission)\.(deny|ask|allow)\[(\d+)\]|^(test)\[(\d+)\]`)
+
+func sourceFromScope(file string, scope string, name string) *VerifySource {
+	source := &VerifySource{File: file, Name: name}
+	if scope == "" {
+		return source
+	}
+	m := scopeRe.FindStringSubmatch(scope)
+	if len(m) == 0 {
+		source.Section = scope
+		return source
+	}
+	if m[1] == "permission" {
+		source.Section = "permission"
+		source.Bucket = m[2]
+		source.Index = atoi(m[3])
+		return source
+	}
+	source.Section = "test"
+	source.Index = atoi(m[5])
+	return source
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return n
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+func nonEmpty(v string, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
 }

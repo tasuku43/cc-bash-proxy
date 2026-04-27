@@ -2,6 +2,7 @@ package doctoring
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,6 +144,47 @@ func HasFailures(report Report) bool {
 }
 
 func testsPass(p policy.Pipeline, tool string, cwd string, home string) error {
+	failures := CollectTestFailures(p, tool, cwd, home, false)
+	if len(failures) > 0 {
+		return failures[0]
+	}
+	return nil
+}
+
+type TestFailure struct {
+	Scope       string
+	Name        string
+	Kind        string
+	Example     string
+	Source      policy.Source
+	Expected    string
+	Got         string
+	Reason      string
+	Decision    policy.Decision
+	Policy      string
+	Claude      string
+	Final       string
+	MatchedRule *policy.TraceStep
+}
+
+func (e TestFailure) Error() string {
+	return (&exampleError{
+		Scope:    e.Scope,
+		Name:     e.Name,
+		Kind:     e.Kind,
+		Example:  e.Example,
+		Source:   e.Source,
+		Expected: e.Expected,
+		Got:      e.Got,
+	}).Error()
+}
+
+func CollectTestFailures(p policy.Pipeline, tool string, cwd string, home string, all bool) []TestFailure {
+	var failures []TestFailure
+	add := func(f TestFailure) bool {
+		failures = append(failures, f)
+		return !all
+	}
 	checkPermission := func(scope string, rules []policy.PermissionRuleSpec, effect string) error {
 		for i, rule := range rules {
 			var expect []string
@@ -156,36 +198,111 @@ func testsPass(p policy.Pipeline, tool string, cwd string, home string) error {
 			}
 			for _, ex := range expect {
 				if !permissionRuleMatchesEffect(rule, ex, effect) {
-					return &exampleError{Scope: scope, Name: scopeName(scope, i), Kind: "expect", Example: ex, Source: rule.Source}
+					if add(TestFailure{Scope: scope, Name: scopeName(scope, i), Kind: "expect", Example: ex, Source: rule.Source, Expected: effect}) {
+						return errStopTests
+					}
 				}
 			}
 			for _, ex := range rule.Test.Pass {
 				if permissionRuleMatchesEffect(rule, ex, effect) {
-					return &exampleError{Scope: scope, Name: scopeName(scope, i), Kind: "pass", Example: ex, Source: rule.Source}
+					if add(TestFailure{Scope: scope, Name: scopeName(scope, i), Kind: "pass", Example: ex, Source: rule.Source}) {
+						return errStopTests
+					}
 				}
 			}
 		}
 		return nil
 	}
 	if err := checkPermission("permission.deny", p.Permission.Deny, "deny"); err != nil {
-		return err
+		return failures
 	}
 	if err := checkPermission("permission.ask", p.Permission.Ask, "ask"); err != nil {
-		return err
+		return failures
 	}
 	if err := checkPermission("permission.allow", p.Permission.Allow, "allow"); err != nil {
-		return err
+		return failures
 	}
 
 	for _, ex := range p.Test {
 		decision, err := policy.Evaluate(p, ex.In)
 		if err != nil {
-			return err
+			if add(TestFailure{Scope: "test", Name: scopeName("test", ex.Source.Index), Kind: "evaluate", Example: ex.In, Source: ex.Source, Expected: ex.Decision, Got: "error", Reason: err.Error()}) {
+				return failures
+			}
+			continue
 		}
+		policyOutcome := decision.Outcome
 		decision = claude.ApplyPermissionBridge(tool, decision, cwd, home)
 		if decision.Outcome != ex.Decision {
-			return &exampleError{Scope: "test", Name: scopeName("test", ex.Source.Index), Kind: "decision", Example: ex.In, Source: ex.Source, Expected: ex.Decision, Got: decision.Outcome}
+			claudeOutcome, finalOutcome := traceDecisions(decision.Trace, decision.Outcome)
+			f := TestFailure{
+				Scope:       "test",
+				Name:        scopeName("test", ex.Source.Index),
+				Kind:        "decision",
+				Example:     ex.In,
+				Source:      ex.Source,
+				Expected:    ex.Decision,
+				Got:         decision.Outcome,
+				Reason:      decisionReason(decision),
+				Decision:    decision,
+				Policy:      policyOutcome,
+				Claude:      claudeOutcome,
+				Final:       finalOutcome,
+				MatchedRule: matchedRuleTrace(decision.Trace),
+			}
+			if add(f) {
+				return failures
+			}
 		}
+	}
+	return failures
+}
+
+var errStopTests = errors.New("stop after first test failure")
+
+func traceDecisions(trace []policy.TraceStep, fallback string) (string, string) {
+	claudeOutcome := "abstain"
+	finalOutcome := fallback
+	for _, step := range trace {
+		if step.Action != "permission" {
+			continue
+		}
+		switch step.Name {
+		case "claude_settings":
+			if step.Effect != "" {
+				claudeOutcome = step.Effect
+			}
+		case "permission_sources_merge":
+			if step.Effect != "" {
+				finalOutcome = step.Effect
+			}
+		}
+	}
+	return claudeOutcome, finalOutcome
+}
+
+func decisionReason(decision policy.Decision) string {
+	switch decision.Reason {
+	case "rule_match":
+		return "cc-bash-guard policy " + decision.Outcome
+	case "claude_settings":
+		return "Claude settings " + decision.Outcome
+	case "default_fallback":
+		return "all permission sources abstained; fallback ask"
+	case "":
+		return decision.Outcome
+	default:
+		return decision.Reason
+	}
+}
+
+func matchedRuleTrace(trace []policy.TraceStep) *policy.TraceStep {
+	for i := len(trace) - 1; i >= 0; i-- {
+		step := trace[i]
+		if step.Action != "permission" || step.Source == nil {
+			continue
+		}
+		return &step
 	}
 	return nil
 }

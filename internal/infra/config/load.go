@@ -590,7 +590,7 @@ func validatePermissionCommandSemanticYAML(prefix string, rule *yaml.Node) []str
 			continue
 		}
 		if gotType, ok := semanticYAMLTypeMismatch(value, wantType); ok {
-			issues = append(issues, fmt.Sprintf("%s.semantic.%s must be %s, got %s.", prefix, field, wantType, gotType))
+			issues = append(issues, fmt.Sprintf("%s.semantic.%s must be %s, got %s. Command: %s.", prefix, field, wantType, gotType, name))
 		}
 	}
 	return issues
