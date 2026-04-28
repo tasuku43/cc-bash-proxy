@@ -364,6 +364,41 @@ func TestParseCommandPlanUnsafeShellShapesFailClosed(t *testing.T) {
 	}
 }
 
+func TestParseCommandPlanClassifiesRedirectionShapeFlags(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		wantFlag   string
+		wantUnsafe bool
+	}{
+		{name: "stderr stdout stream merge", raw: "ls 2>&1", wantFlag: "redirect_stream_merge", wantUnsafe: true},
+		{name: "stdout stderr stream merge", raw: "git status 1>&2", wantFlag: "redirect_stream_merge", wantUnsafe: true},
+		{name: "file write", raw: "ls > /tmp/out", wantFlag: "redirect_file_write", wantUnsafe: true},
+		{name: "file append", raw: "ls >> /tmp/out", wantFlag: "redirect_append_file", wantUnsafe: true},
+		{name: "devnull sink", raw: "ls > /dev/null", wantFlag: "redirect_to_devnull", wantUnsafe: false},
+		{name: "heredoc input", raw: "cat <<EOF | psql\nselect 1;\nEOF", wantFlag: "redirect_heredoc", wantUnsafe: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := Parse(tt.raw)
+			if !containsString(plan.Shape.Flags(), tt.wantFlag) {
+				t.Fatalf("Shape.Flags() = %#v, want %q", plan.Shape.Flags(), tt.wantFlag)
+			}
+			if len(plan.Commands) == 0 {
+				t.Fatalf("len(Commands) = 0, want at least 1; diagnostics=%+v", plan.Diagnostics)
+			}
+			if !containsString(plan.Commands[0].ShapeFlags, tt.wantFlag) {
+				t.Fatalf("Commands[0].ShapeFlags = %#v, want %q; commands=%+v", plan.Commands[0].ShapeFlags, tt.wantFlag, plan.Commands)
+			}
+			safety := EvaluationSafetyForPlan(plan)
+			if safety.Safe == tt.wantUnsafe {
+				t.Fatalf("Safety.Safe = %v, want %v; reasons=%#v", safety.Safe, !tt.wantUnsafe, safety.Reasons)
+			}
+		})
+	}
+}
+
 func TestCommandPlanEvaluationSafetyReasons(t *testing.T) {
 	tests := []struct {
 		name       string

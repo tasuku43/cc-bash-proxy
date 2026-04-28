@@ -38,9 +38,12 @@ type PermissionRuleSpec struct {
 }
 
 type PermissionCommandSpec struct {
-	Name     string             `yaml:"name" json:"name,omitempty"`
-	NameIn   []string           `yaml:"name_in" json:"name_in,omitempty"`
-	Semantic *SemanticMatchSpec `yaml:"semantic" json:"semantic,omitempty"`
+	Name           string             `yaml:"name" json:"name,omitempty"`
+	NameIn         []string           `yaml:"name_in" json:"name_in,omitempty"`
+	ShapeFlagsAny  []string           `yaml:"shape_flags_any" json:"shape_flags_any,omitempty"`
+	ShapeFlagsAll  []string           `yaml:"shape_flags_all" json:"shape_flags_all,omitempty"`
+	ShapeFlagsNone []string           `yaml:"shape_flags_none" json:"shape_flags_none,omitempty"`
+	Semantic       *SemanticMatchSpec `yaml:"semantic" json:"semantic,omitempty"`
 }
 
 type PermissionEnvSpec struct {
@@ -1498,6 +1501,9 @@ func permissionPredicateSummary(rule PermissionRuleSpec) string {
 		if rule.Command.Semantic != nil {
 			groups = append(groups, "semantic")
 		}
+		if permissionCommandUsesShapeFlags(rule.Command) {
+			groups = append(groups, "shape_flags")
+		}
 	}
 	if len(rule.Patterns) > 0 {
 		groups = append(groups, "patterns")
@@ -1516,7 +1522,10 @@ func allowRuleCanMatch(rule PermissionRuleSpec, command string) bool {
 	if !commandpkg.IsSafeForEvaluation(plan) {
 		return false
 	}
-	return invocation.IsStructuredSafeForAllow(command)
+	if invocation.IsStructuredSafeForAllow(command) {
+		return true
+	}
+	return len(plan.Commands) == 1 && commandAllowRuleCanMatch(plan.Commands[0])
 }
 
 func commandAllowRuleCanMatch(cmd commandpkg.Command) bool {
@@ -1668,8 +1677,32 @@ func (s preparedPermissionSelector) matchesCommandValue(cmd commandpkg.Command) 
 	if !permissionCommandStructuralScopeMatches(s.Command, s.Env, cmd) {
 		return false
 	}
+	if !permissionCommandShapeFlagsMatch(s.Command, cmd.ShapeFlags) {
+		return false
+	}
 	if s.Command.Semantic != nil {
 		return permissionSemanticMatches(s.Command.Name, *s.Command.Semantic, cmd)
+	}
+	return true
+}
+
+func permissionCommandUsesShapeFlags(command PermissionCommandSpec) bool {
+	return len(command.ShapeFlagsAny) > 0 || len(command.ShapeFlagsAll) > 0 || len(command.ShapeFlagsNone) > 0
+}
+
+func permissionCommandShapeFlagsMatch(command PermissionCommandSpec, flags []string) bool {
+	if len(command.ShapeFlagsAny) > 0 && !containsAnyString(flags, command.ShapeFlagsAny) {
+		return false
+	}
+	for _, flag := range command.ShapeFlagsAll {
+		if !containsString(flags, strings.TrimSpace(flag)) {
+			return false
+		}
+	}
+	for _, flag := range command.ShapeFlagsNone {
+		if containsString(flags, strings.TrimSpace(flag)) {
+			return false
+		}
 	}
 	return true
 }
@@ -2908,6 +2941,9 @@ func ValidatePermissionCommandSpec(prefix string, command PermissionCommandSpec)
 		}
 	}
 	issues = append(issues, validateNonEmptyStrings(prefix+".name_in", command.NameIn)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".shape_flags_any", command.ShapeFlagsAny)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".shape_flags_all", command.ShapeFlagsAll)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".shape_flags_none", command.ShapeFlagsNone)...)
 	if strings.TrimSpace(command.Name) == "" && len(command.NameIn) == 0 {
 		issues = append(issues, prefix+".name or "+prefix+".name_in must be set")
 	}
@@ -3400,7 +3436,12 @@ func IsZeroPermissionSpec(spec PermissionSpec) bool {
 }
 
 func IsZeroPermissionCommandSpec(command PermissionCommandSpec) bool {
-	return command.Name == "" && len(command.NameIn) == 0 && command.Semantic == nil
+	return command.Name == "" &&
+		len(command.NameIn) == 0 &&
+		len(command.ShapeFlagsAny) == 0 &&
+		len(command.ShapeFlagsAll) == 0 &&
+		len(command.ShapeFlagsNone) == 0 &&
+		command.Semantic == nil
 }
 
 func IsZeroPermissionEnvSpec(env PermissionEnvSpec) bool {

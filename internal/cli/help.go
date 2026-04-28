@@ -248,7 +248,7 @@ Start with deny rules for dangerous commands, allow rules for known safe
 commands, and ask rules for commands that need review.
 
 Rule fields:
-  command   Match a command by name/name_in and, when supported, command-specific semantic fields.
+  command   Match a command by name/name_in, shape flags, and supported semantic fields.
   env       Match environment variables required or missing for the invocation.
   patterns  Match the raw command string with one or more regular expressions.
 
@@ -257,6 +257,8 @@ Valid combinations:
   command (name) + env
   command (name_in)
   command (name_in) + env
+  command + shape_flags_any/all/none
+  command + shape_flags_any/all/none + env
   command + semantic
   command + semantic + env
   patterns
@@ -267,6 +269,9 @@ When to use each matcher:
   Use command.semantic for commands listed by cc-bash-guard help semantic.
   The semantic schema is selected by command.name.
   Use command.name_in for a non-semantic OR list of command names.
+  Use command.shape_flags_any/all/none for parser-derived shell shape flags,
+  such as redirect_stream_merge, redirect_to_devnull, redirect_file_write,
+  redirect_append_file, redirect_stdin_from_file, and redirect_heredoc.
   Semantic fields live directly under command.semantic; no extra tool-name
   nesting is required because command.name is the discriminator.
   Use patterns for raw regex fallbacks that cannot be expressed with name_in.
@@ -305,6 +310,15 @@ Example:
             - head
             - tail
             - wc
+
+    deny:
+      - name: block stream merge redirects
+        command:
+          name_in:
+            - ls
+            - git
+          shape_flags_any:
+            - redirect_stream_merge
 
 Docs:
   docs/user/PERMISSION_SCHEMA.md

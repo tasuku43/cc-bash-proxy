@@ -54,6 +54,49 @@ func TestEvaluatePermissionUsesOriginalCommandForRawPatterns(t *testing.T) {
 	}
 }
 
+func TestEvaluatePermissionCommandShapeFlagsForRedirectionKinds(t *testing.T) {
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Deny: []PermissionRuleSpec{{
+				Command: PermissionCommandSpec{
+					NameIn:        []string{"git", "ls"},
+					ShapeFlagsAny: []string{"redirect_stream_merge"},
+				},
+			}},
+			Allow: []PermissionRuleSpec{{
+				Command: PermissionCommandSpec{NameIn: []string{"echo", "grep", "ls"}},
+			}},
+		},
+	}, Source{})
+
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{command: "ls 2>&1", want: "deny"},
+		{command: "git status 1>&2", want: "deny"},
+		{command: "ls 2>&1 | jq .", want: "deny"},
+		{command: "ls", want: "allow"},
+		{command: "ls > /dev/null", want: "allow"},
+		{command: "grep '2>&1' file", want: "allow"},
+		{command: "echo '> /tmp/out'", want: "allow"},
+		{command: "ls > /tmp/out", want: "ask"},
+		{command: "ls >> /tmp/out", want: "ask"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			got, err := Evaluate(p, tt.command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != tt.want {
+				t.Fatalf("Outcome = %q, want %q; decision=%+v", got.Outcome, tt.want, got)
+			}
+		})
+	}
+}
+
 func TestEvaluatePatternsMatchShellDashCInnerCommand(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{

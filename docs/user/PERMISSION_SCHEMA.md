@@ -78,6 +78,40 @@ The semantic schema is selected by `command.name`. Fields live directly under
 `name` and `name_in` are mutually exclusive. `name_in` cannot be combined with
 `semantic`; it may be combined with `env`.
 
+`shape_flags_any`, `shape_flags_all`, and `shape_flags_none` can be placed under
+`command` to match parser-derived shell shape flags for the same command
+segment. These flags are quote-aware: `grep '2>&1' file` contains a literal
+argument, not a redirection. Redirection flags include:
+
+- `redirect_stream_merge` for descriptor merges such as `2>&1` and `1>&2`
+- `redirect_to_devnull` for output redirected to `/dev/null`
+- `redirect_file_write` for `> file`
+- `redirect_append_file` for `>> file`
+- `redirect_stdin_from_file` for `< file`
+- `redirect_heredoc` for `<<`, `<<-`, and `<<<`
+
+```yaml
+permission:
+  deny:
+    - name: block stream merge redirects
+      command:
+        name_in:
+          - ls
+          - git
+        shape_flags_any:
+          - redirect_stream_merge
+  allow:
+    - name: read-only shell basics
+      command:
+        name_in:
+          - ls
+          - grep
+```
+
+With this policy, `ls 2>&1` is denied, `ls > /dev/null` may be allowed by the
+base `ls` rule, and `ls > /tmp/out` still asks because file writes remain
+fail-closed unless explicitly handled.
+
 ```yaml
 permission:
   allow:

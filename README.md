@@ -346,6 +346,31 @@ are interpreted in that parser's namespace, so no extra tool-name nesting under
 `semantic` is required. `command.name_in` is mutually exclusive with
 `command.name` and cannot be combined with `command.semantic`.
 
+`command.shape_flags_any`, `command.shape_flags_all`, and
+`command.shape_flags_none` match parser-derived shell shape flags for the same
+command segment. Redirection flags are quote-aware because they come from the
+shell AST, not raw regex matching. Useful flags include
+`redirect_stream_merge` for `2>&1` / `1>&2`, `redirect_to_devnull` for
+`> /dev/null`, `redirect_file_write` for `> file`, `redirect_append_file` for
+`>> file`, `redirect_stdin_from_file`, and `redirect_heredoc`.
+
+```yaml
+permission:
+  deny:
+    - name: block stream merge redirects
+      command:
+        name_in: [ls, git]
+        shape_flags_any: [redirect_stream_merge]
+  allow:
+    - name: read-only basics
+      command:
+        name_in: [ls, grep]
+```
+
+In this example `ls 2>&1` is denied, `grep '2>&1' file` is not treated as a
+redirection, `ls > /dev/null` may follow the `ls` allow rule, and
+`ls > /tmp/out` still falls back to confirmation.
+
 Use `command.name_in` for non-semantic command-name lists, including read-only
 basics such as `ls`, `cat`, `grep`, `head`, `tail`, and `pwd`. It uses the same
 parser-backed command name normalization as `command.name`, so `/bin/ls` matches

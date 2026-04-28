@@ -16,6 +16,7 @@ type Command struct {
 	RawWords     []string
 	RawOptions   []Option
 	Parser       string
+	ShapeFlags   []string
 
 	// Semantic layer: optional fields added by CLI-specific parsers.
 	GlobalOptions    []Option
@@ -229,6 +230,7 @@ type ShellShape struct {
 	HasSequence            bool
 	HasBackground          bool
 	HasRedirection         bool
+	RedirectionFlags       []string
 	HasSubshell            bool
 	HasCommandSubstitution bool
 	HasProcessSubstitution bool
@@ -291,7 +293,7 @@ func ParseWithRegistry(raw string, registry *CommandParserRegistry) CommandPlan 
 	plan.SafeForStructuredAllow = plan.Shape.Kind == ShellShapeSimple &&
 		len(plan.Commands) == 1 &&
 		len(plan.Diagnostics) == 0 &&
-		invocation.IsStructuredSafeForAllow(raw)
+		plan.structuredSafeForAllow()
 	return plan
 }
 
@@ -363,11 +365,24 @@ func unsafeEvaluationReasons(plan CommandPlan) []string {
 
 	if plan.Shape.Kind != ShellShapeSimple {
 		reasons = append(reasons, "unknown_shape")
-	} else if !invocation.IsStructuredSafeForAllow(plan.Raw) {
+	} else if !plan.structuredSafeForAllow() {
 		reasons = append(reasons, "unsafe_ast")
 	}
 
 	return dedupeStrings(reasons)
+}
+
+func (p CommandPlan) structuredSafeForAllow() bool {
+	if len(p.Shape.RedirectionFlags) == 0 {
+		return invocation.IsStructuredSafeForAllow(p.Raw)
+	}
+	if hasUnsafeRedirectionFlag(p.Shape.RedirectionFlags) {
+		return false
+	}
+	if len(p.Commands) != 1 {
+		return false
+	}
+	return invocation.IsStructuredSafeForAllow(p.Commands[0].Raw)
 }
 
 func (s ShellShape) hasNonPipelineCompoundFeature() bool {
@@ -397,6 +412,7 @@ func (s ShellShape) Flags() []string {
 	if s.HasRedirection {
 		flags = append(flags, "redirection")
 	}
+	flags = append(flags, s.RedirectionFlags...)
 	if s.HasSubshell {
 		flags = append(flags, "subshell")
 	}
@@ -432,6 +448,7 @@ type planWalker struct {
 	commands    []Command
 	diagnostics []Diagnostic
 	normalized  []NormalizedCommand
+	stmtFlags   []string
 }
 
 func (w *planWalker) visitStmt(stmt *syntax.Stmt) {
@@ -441,13 +458,18 @@ func (w *planWalker) visitStmt(stmt *syntax.Stmt) {
 	if stmt.Background || stmt.Coprocess || stmt.Disown {
 		w.shape.HasBackground = true
 	}
-	if len(stmt.Redirs) > 0 {
+	redirFlags := redirectionFlags(stmt.Redirs)
+	if hasUnsafeRedirectionFlag(redirFlags) {
 		w.shape.HasRedirection = true
 	}
+	w.shape.RedirectionFlags = append(w.shape.RedirectionFlags, redirFlags...)
 	if len(stmt.Comments) > 0 || stmt.Negated {
 		w.shape.Kind = ShellShapeUnknown
 	}
+	previousStmtFlags := w.stmtFlags
+	w.stmtFlags = redirFlags
 	w.visitCommand(stmt.Cmd)
+	w.stmtFlags = previousStmtFlags
 	for _, redir := range stmt.Redirs {
 		w.visitWord(redir.Word)
 		w.visitWord(redir.Hdoc)
@@ -508,6 +530,7 @@ func (w *planWalker) visitCall(call *syntax.CallExpr) {
 	raw := w.nodeRaw(call)
 	inv := NewInvocation(raw)
 	if cmd, ok := w.registry.Parse(inv); ok {
+		cmd.ShapeFlags = append(cmd.ShapeFlags, w.stmtFlags...)
 		if cmd.ProgramToken != "" && cmd.Program != cmd.ProgramToken {
 			w.normalized = append(w.normalized, NormalizedCommand{
 				OriginalToken: cmd.ProgramToken,
@@ -562,6 +585,7 @@ func mergeShellShape(a ShellShape, b ShellShape) ShellShape {
 	a.HasSequence = a.HasSequence || b.HasSequence
 	a.HasBackground = a.HasBackground || b.HasBackground
 	a.HasRedirection = a.HasRedirection || b.HasRedirection
+	a.RedirectionFlags = append(a.RedirectionFlags, b.RedirectionFlags...)
 	a.HasSubshell = a.HasSubshell || b.HasSubshell
 	a.HasCommandSubstitution = a.HasCommandSubstitution || b.HasCommandSubstitution
 	a.HasProcessSubstitution = a.HasProcessSubstitution || b.HasProcessSubstitution
@@ -611,6 +635,7 @@ func (w *planWalker) nodeRaw(node syntax.Node) string {
 }
 
 func (s ShellShape) finalize() ShellShape {
+	s.RedirectionFlags = dedupeStrings(s.RedirectionFlags)
 	if s.Kind == ShellShapeUnknown {
 		return s
 	}
@@ -629,4 +654,92 @@ func (s ShellShape) finalize() ShellShape {
 		s.Kind = ShellShapeSimple
 	}
 	return s
+}
+
+func redirectionFlags(redirs []*syntax.Redirect) []string {
+	flags := make([]string, 0, len(redirs))
+	for _, redir := range redirs {
+		if redir == nil {
+			continue
+		}
+		flags = append(flags, redirectionFlag(redir))
+	}
+	return dedupeStrings(flags)
+}
+
+func redirectionFlag(redir *syntax.Redirect) string {
+	switch redir.Op {
+	case syntax.DplOut:
+		if isFdWord(redir.Word) {
+			return "redirect_stream_merge"
+		}
+		return "redirect_output_dup"
+	case syntax.DplIn:
+		if isFdWord(redir.Word) {
+			return "redirect_stream_merge"
+		}
+		return "redirect_input_dup"
+	case syntax.RdrOut, syntax.RdrClob, syntax.RdrAll, syntax.RdrAllClob:
+		if isDevNullWord(redir.Word) {
+			return "redirect_to_devnull"
+		}
+		return "redirect_file_write"
+	case syntax.AppOut, syntax.AppClob, syntax.AppAll, syntax.AppAllClob:
+		if isDevNullWord(redir.Word) {
+			return "redirect_to_devnull"
+		}
+		return "redirect_append_file"
+	case syntax.RdrIn, syntax.RdrInOut:
+		if isDevNullWord(redir.Word) {
+			return "redirect_from_devnull"
+		}
+		return "redirect_stdin_from_file"
+	case syntax.Hdoc, syntax.DashHdoc, syntax.WordHdoc:
+		return "redirect_heredoc"
+	default:
+		return "redirect_unknown"
+	}
+}
+
+func hasUnsafeRedirectionFlag(flags []string) bool {
+	for _, flag := range flags {
+		switch flag {
+		case "redirect_stream_merge", "redirect_file_write", "redirect_append_file", "redirect_output_dup", "redirect_input_dup", "redirect_unknown":
+			return true
+		}
+	}
+	return false
+}
+
+func isFdWord(word *syntax.Word) bool {
+	value, ok := literalWordValue(word)
+	if !ok || value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func isDevNullWord(word *syntax.Word) bool {
+	value, ok := literalWordValue(word)
+	return ok && value == "/dev/null"
+}
+
+func literalWordValue(word *syntax.Word) (string, bool) {
+	if word == nil {
+		return "", false
+	}
+	var b strings.Builder
+	for _, part := range word.Parts {
+		lit, ok := part.(*syntax.Lit)
+		if !ok {
+			return "", false
+		}
+		b.WriteString(lit.Value)
+	}
+	return b.String(), true
 }

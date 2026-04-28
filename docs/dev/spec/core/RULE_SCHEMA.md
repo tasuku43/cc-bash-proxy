@@ -72,8 +72,17 @@ permission:
 
 Rules may combine `command + env` or `patterns + env`. `command + patterns` is
 invalid. `command.name` matches one command. `command.name_in` matches a
-non-semantic OR list of command names and may combine only with `env`; it is
-mutually exclusive with `command.name` and `command.semantic`.
+non-semantic OR list of command names and may combine with `env` and
+`command.shape_flags_*`; it is mutually exclusive with `command.name` and
+`command.semantic`.
+
+`command.shape_flags_any`, `command.shape_flags_all`, and
+`command.shape_flags_none` match parser-derived shell shape flags on the same
+command segment. Redirection flags are produced from the shell AST after quote
+parsing, so quoted literals do not match as redirects. Implemented redirection
+flags include `redirect_stream_merge`, `redirect_to_devnull`,
+`redirect_file_write`, `redirect_append_file`, `redirect_stdin_from_file`, and
+`redirect_heredoc`.
 
 Top-level `test` asserts final permission decision only:
 
