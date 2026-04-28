@@ -580,6 +580,40 @@ test:
 			want: "permission.deny[0].command.semantic.dry_run must be bool, got string.",
 		},
 		{
+			name: "unknown gws semantic field",
+			body: `permission:
+  deny:
+    - command:
+        name: gws
+        semantic:
+          namespace: prod
+      test:
+        deny: ["gws drive files delete"]
+        abstain: ["gws drive files list"]
+test:
+  - in: "gws drive files delete"
+    decision: deny
+`,
+			want: "permission.deny[0].command.semantic.namespace is not supported for command gws. Supported semantic fields for gws:",
+		},
+		{
+			name: "unsupported gws semantic type",
+			body: `permission:
+  deny:
+    - command:
+        name: gws
+        semantic:
+          unmasked: "true"
+      test:
+        deny: ["gws auth export --unmasked"]
+        abstain: ["gws auth login"]
+test:
+  - in: "gws auth export --unmasked"
+    decision: deny
+`,
+			want: "permission.deny[0].command.semantic.unmasked must be bool, got string.",
+		},
+		{
 			name: "nested aws semantic key",
 			body: `permission:
   deny:
@@ -730,6 +764,36 @@ test:
 				t.Fatalf("VerifyFile() error = %v, want containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestVerifyFileAcceptsGwsSemanticSchema(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cc-bash-guard.yml")
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	body := `permission:
+  allow:
+    - command:
+        name: gws
+        semantic:
+          service: drive
+          resource_path: [files]
+          method: list
+          params: true
+      test:
+        allow:
+          - "gws drive files list --params '{\"pageSize\": 5}'"
+        abstain:
+          - "gws drive files delete --params '{\"fileId\":\"abc\"}'"
+test:
+  - in: "gws drive files list --params '{\"pageSize\": 5}'"
+    decision: allow
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyFile(Source{Layer: LayerUser, Path: path}, cacheDir, "vtest"); err != nil {
+		t.Fatalf("VerifyFile() error = %v", err)
 	}
 }
 

@@ -1,0 +1,51 @@
+permission:
+  deny:
+    - name: gws unmasked credential export
+      command:
+        name: gws
+        semantic:
+          service: auth
+          method: export
+          unmasked: true
+      message: "gws auth export --unmasked is denied"
+      test:
+        deny:
+          - "gws auth export --unmasked"
+        abstain:
+          - "gws auth login"
+
+    - name: gws destructive operations
+      command:
+        name: gws
+        semantic:
+          destructive: true
+      message: "gws destructive operations are denied"
+      test:
+        deny:
+          - "gws drive files delete --params '{\"fileId\":\"abc\"}'"
+        abstain:
+          - "gws drive files list"
+
+  allow:
+    - name: gws read-only operations
+      command:
+        name: gws
+        semantic:
+          read_only: true
+      message: "allow gws read-only operations"
+      test:
+        allow:
+          - "gws drive files list --params '{\"pageSize\": 5}'"
+          - "gws drive files get --params '{\"fileId\":\"abc\"}'"
+          - "gws calendar +agenda --today"
+        abstain:
+          - "gws drive files delete --params '{\"fileId\":\"abc\"}'"
+          - "gws auth export --unmasked"
+
+test:
+  allow:
+    - "gws drive files list --params '{\"pageSize\": 5}'"
+    - "gws calendar +agenda --today"
+  deny:
+    - "gws drive files delete --params '{\"fileId\":\"abc\"}'"
+    - "gws auth export --unmasked"

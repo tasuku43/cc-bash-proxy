@@ -221,6 +221,19 @@ type SemanticMatchSpec struct {
 	Web                              *bool    `yaml:"web" json:"web,omitempty"`
 	Method                           string   `yaml:"method" json:"method,omitempty"`
 	MethodIn                         []string `yaml:"method_in" json:"method_in,omitempty"`
+	ResourcePath                     []string `yaml:"resource_path" json:"resource_path,omitempty"`
+	ResourcePathContains             []string `yaml:"resource_path_contains" json:"resource_path_contains,omitempty"`
+	Helper                           *bool    `yaml:"helper" json:"helper,omitempty"`
+	Mutating                         *bool    `yaml:"mutating" json:"mutating,omitempty"`
+	Destructive                      *bool    `yaml:"destructive" json:"destructive,omitempty"`
+	ReadOnly                         *bool    `yaml:"read_only" json:"read_only,omitempty"`
+	PageAll                          *bool    `yaml:"page_all" json:"page_all,omitempty"`
+	Upload                           *bool    `yaml:"upload" json:"upload,omitempty"`
+	Sanitize                         *bool    `yaml:"sanitize" json:"sanitize,omitempty"`
+	Params                           *bool    `yaml:"params" json:"params,omitempty"`
+	JSONBody                         *bool    `yaml:"json_body" json:"json_body,omitempty"`
+	Unmasked                         *bool    `yaml:"unmasked" json:"unmasked,omitempty"`
+	Scopes                           []string `yaml:"scopes" json:"scopes,omitempty"`
 	Endpoint                         string   `yaml:"endpoint" json:"endpoint,omitempty"`
 	EndpointPrefix                   string   `yaml:"endpoint_prefix" json:"endpoint_prefix,omitempty"`
 	EndpointContains                 []string `yaml:"endpoint_contains" json:"endpoint_contains,omitempty"`
@@ -399,6 +412,29 @@ type GHSemanticSpec struct {
 	FlagsPrefixes        []string
 }
 
+type GwsSemanticSpec struct {
+	Service              string
+	ServiceIn            []string
+	ResourcePath         []string
+	ResourcePathContains []string
+	Method               string
+	MethodIn             []string
+	Helper               *bool
+	Mutating             *bool
+	Destructive          *bool
+	ReadOnly             *bool
+	DryRun               *bool
+	PageAll              *bool
+	Upload               *bool
+	Sanitize             *bool
+	Params               *bool
+	JSONBody             *bool
+	Unmasked             *bool
+	Scopes               []string
+	FlagsContains        []string
+	FlagsPrefixes        []string
+}
+
 type HelmfileSemanticSpec struct {
 	Verb                             string
 	VerbIn                           []string
@@ -502,6 +538,17 @@ func (s SemanticMatchSpec) GH() GHSemanticSpec {
 		Fill: s.Fill, Force: s.Force, Admin: s.Admin, Auto: s.Auto, DeleteBranch: s.DeleteBranch,
 		MergeStrategy: s.MergeStrategy, MergeStrategyIn: s.MergeStrategyIn, RunID: s.RunID,
 		Failed: s.Failed, Job: s.Job, Debug: s.Debug, ExitStatus: s.ExitStatus,
+		FlagsContains: s.FlagsContains, FlagsPrefixes: s.FlagsPrefixes,
+	}
+}
+
+func (s SemanticMatchSpec) Gws() GwsSemanticSpec {
+	return GwsSemanticSpec{
+		Service: s.Service, ServiceIn: s.ServiceIn, ResourcePath: s.ResourcePath,
+		ResourcePathContains: s.ResourcePathContains, Method: s.Method, MethodIn: s.MethodIn,
+		Helper: s.Helper, Mutating: s.Mutating, Destructive: s.Destructive, ReadOnly: s.ReadOnly,
+		DryRun: s.DryRun, PageAll: s.PageAll, Upload: s.Upload, Sanitize: s.Sanitize,
+		Params: s.Params, JSONBody: s.JSONBody, Unmasked: s.Unmasked, Scopes: s.Scopes,
 		FlagsContains: s.FlagsContains, FlagsPrefixes: s.FlagsPrefixes,
 	}
 }
@@ -1530,6 +1577,8 @@ func permissionSemanticMatches(command string, semantic SemanticMatchSpec, cmd c
 		return semantic.Kubectl().matches(cmd)
 	case "gh":
 		return semantic.GH().matches(cmd)
+	case "gws":
+		return semantic.Gws().matches(cmd)
 	case "helmfile":
 		return semantic.Helmfile().matches(cmd)
 	case "argocd":
@@ -1862,6 +1911,10 @@ func (m MatchSpec) matches(cmd commandpkg.Command) bool {
 			}
 		case "gh":
 			if !m.Semantic.GH().matches(cmd) {
+				return false
+			}
+		case "gws":
+			if !m.Semantic.Gws().matches(cmd) {
 				return false
 			}
 		case "helmfile":
@@ -2303,6 +2356,82 @@ func (s GHSemanticSpec) matches(cmd commandpkg.Command) bool {
 	}
 	for _, prefix := range s.FlagsPrefixes {
 		if !containsPrefix(gh.Flags, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s GwsSemanticSpec) matches(cmd commandpkg.Command) bool {
+	if cmd.SemanticParser != "gws" || cmd.Gws == nil {
+		return false
+	}
+	gws := cmd.Gws
+	if s.Service != "" && gws.Service != s.Service {
+		return false
+	}
+	if len(s.ServiceIn) > 0 && !containsString(s.ServiceIn, gws.Service) {
+		return false
+	}
+	if len(s.ResourcePath) > 0 && !equalStrings(gws.ResourcePath, s.ResourcePath) {
+		return false
+	}
+	for _, resource := range s.ResourcePathContains {
+		if !containsString(gws.ResourcePath, resource) {
+			return false
+		}
+	}
+	if s.Method != "" && gws.Method != s.Method {
+		return false
+	}
+	if len(s.MethodIn) > 0 && !containsString(s.MethodIn, gws.Method) {
+		return false
+	}
+	if s.Helper != nil && gws.Helper != *s.Helper {
+		return false
+	}
+	if s.Mutating != nil && gws.Mutating != *s.Mutating {
+		return false
+	}
+	if s.Destructive != nil && gws.Destructive != *s.Destructive {
+		return false
+	}
+	if s.ReadOnly != nil && gws.ReadOnly != *s.ReadOnly {
+		return false
+	}
+	if s.DryRun != nil && gws.DryRun != *s.DryRun {
+		return false
+	}
+	if s.PageAll != nil && gws.PageAll != *s.PageAll {
+		return false
+	}
+	if s.Upload != nil && gws.Upload != *s.Upload {
+		return false
+	}
+	if s.Sanitize != nil && gws.Sanitize != *s.Sanitize {
+		return false
+	}
+	if s.Params != nil && gws.Params != *s.Params {
+		return false
+	}
+	if s.JSONBody != nil && gws.JSONBody != *s.JSONBody {
+		return false
+	}
+	if s.Unmasked != nil && gws.Unmasked != *s.Unmasked {
+		return false
+	}
+	for _, scope := range s.Scopes {
+		if !containsString(gws.Scopes, scope) {
+			return false
+		}
+	}
+	for _, flag := range s.FlagsContains {
+		if !containsString(gws.Flags, flag) {
+			return false
+		}
+	}
+	for _, prefix := range s.FlagsPrefixes {
+		if !containsPrefix(gws.Flags, prefix) {
 			return false
 		}
 	}
@@ -2763,6 +2892,45 @@ func (s SemanticMatchSpec) fieldsUsed() []string {
 	if len(s.MethodIn) > 0 {
 		fields = append(fields, "method_in")
 	}
+	if len(s.ResourcePath) > 0 {
+		fields = append(fields, "resource_path")
+	}
+	if len(s.ResourcePathContains) > 0 {
+		fields = append(fields, "resource_path_contains")
+	}
+	if s.Helper != nil {
+		fields = append(fields, "helper")
+	}
+	if s.Mutating != nil {
+		fields = append(fields, "mutating")
+	}
+	if s.Destructive != nil {
+		fields = append(fields, "destructive")
+	}
+	if s.ReadOnly != nil {
+		fields = append(fields, "read_only")
+	}
+	if s.PageAll != nil {
+		fields = append(fields, "page_all")
+	}
+	if s.Upload != nil {
+		fields = append(fields, "upload")
+	}
+	if s.Sanitize != nil {
+		fields = append(fields, "sanitize")
+	}
+	if s.Params != nil {
+		fields = append(fields, "params")
+	}
+	if s.JSONBody != nil {
+		fields = append(fields, "json_body")
+	}
+	if s.Unmasked != nil {
+		fields = append(fields, "unmasked")
+	}
+	if len(s.Scopes) > 0 {
+		fields = append(fields, "scopes")
+	}
 	if s.Endpoint != "" {
 		fields = append(fields, "endpoint")
 	}
@@ -3021,6 +3189,8 @@ func ValidatePermissionCommandSpec(prefix string, command PermissionCommandSpec)
 			issues = append(issues, ValidateKubectlSemanticMatchSpec(prefix+".semantic", *command.Semantic)...)
 		case "gh":
 			issues = append(issues, ValidateGhSemanticMatchSpec(prefix+".semantic", *command.Semantic)...)
+		case "gws":
+			issues = append(issues, ValidateGwsSemanticMatchSpec(prefix+".semantic", *command.Semantic)...)
 		case "helmfile":
 			issues = append(issues, ValidateHelmfileSemanticMatchSpec(prefix+".semantic", *command.Semantic)...)
 		case "argocd":
@@ -3123,6 +3293,8 @@ func validateMatchSpec(prefix string, match MatchSpec, allowSemantic bool) []str
 			issues = append(issues, ValidateKubectlSemanticMatchSpec(prefix+".semantic", *match.Semantic)...)
 		case "gh":
 			issues = append(issues, ValidateGhSemanticMatchSpec(prefix+".semantic", *match.Semantic)...)
+		case "gws":
+			issues = append(issues, ValidateGwsSemanticMatchSpec(prefix+".semantic", *match.Semantic)...)
 		case "helmfile":
 			issues = append(issues, ValidateHelmfileSemanticMatchSpec(prefix+".semantic", *match.Semantic)...)
 		case "argocd":
@@ -3336,6 +3508,33 @@ func ValidateGHSemanticSpec(prefix string, semantic GHSemanticSpec) []string {
 	return issues
 }
 
+func ValidateGwsSemanticMatchSpec(prefix string, semantic SemanticMatchSpec) []string {
+	return ValidateGwsSemanticSpec(prefix, semantic.Gws())
+}
+
+func ValidateGwsSemanticSpec(prefix string, semantic GwsSemanticSpec) []string {
+	var issues []string
+	if IsZeroGwsSemanticSpec(semantic) {
+		issues = append(issues, prefix+" must not be empty")
+	}
+	for name, value := range map[string]string{
+		"service": semantic.Service,
+		"method":  semantic.Method,
+	} {
+		if strings.TrimSpace(value) == "" && value != "" {
+			issues = append(issues, prefix+"."+name+" must be non-empty")
+		}
+	}
+	issues = append(issues, validateNonEmptyStrings(prefix+".service_in", semantic.ServiceIn)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".resource_path", semantic.ResourcePath)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".resource_path_contains", semantic.ResourcePathContains)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".method_in", semantic.MethodIn)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".scopes", semantic.Scopes)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".flags_contains", semantic.FlagsContains)...)
+	issues = append(issues, validateNonEmptyStrings(prefix+".flags_prefixes", semantic.FlagsPrefixes)...)
+	return issues
+}
+
 func ValidateArgoCDSemanticMatchSpec(prefix string, semantic SemanticMatchSpec) []string {
 	return ValidateArgoCDSemanticSpec(prefix, semantic.ArgoCD())
 }
@@ -3514,7 +3713,7 @@ func IsZeroMatchSpec(match MatchSpec) bool {
 }
 
 func IsZeroSemanticMatchSpec(semantic SemanticMatchSpec) bool {
-	return !hasGitSemanticFields(semantic) && !hasAWSSemanticFields(semantic) && !hasKubectlSemanticFields(semantic) && !hasGhSemanticFields(semantic) && !hasHelmfileSemanticFields(semantic) && !hasArgoCDSemanticFields(semantic) &&
+	return !hasGitSemanticFields(semantic) && !hasAWSSemanticFields(semantic) && !hasKubectlSemanticFields(semantic) && !hasGhSemanticFields(semantic) && !hasGwsSemanticFields(semantic) && !hasHelmfileSemanticFields(semantic) && !hasArgoCDSemanticFields(semantic) &&
 		len(semantic.FlagsContains) == 0 &&
 		len(semantic.FlagsPrefixes) == 0
 }
@@ -3576,6 +3775,16 @@ func IsZeroGHSemanticSpec(semantic GHSemanticSpec) bool {
 		semantic.Force == nil && semantic.Admin == nil && semantic.Auto == nil && semantic.DeleteBranch == nil &&
 		semantic.MergeStrategy == "" && len(semantic.MergeStrategyIn) == 0 &&
 		semantic.RunID == "" && semantic.Failed == nil && semantic.Job == "" && semantic.Debug == nil && semantic.ExitStatus == nil &&
+		len(semantic.FlagsContains) == 0 && len(semantic.FlagsPrefixes) == 0
+}
+
+func IsZeroGwsSemanticSpec(semantic GwsSemanticSpec) bool {
+	return semantic.Service == "" && len(semantic.ServiceIn) == 0 &&
+		len(semantic.ResourcePath) == 0 && len(semantic.ResourcePathContains) == 0 &&
+		semantic.Method == "" && len(semantic.MethodIn) == 0 &&
+		semantic.Helper == nil && semantic.Mutating == nil && semantic.Destructive == nil && semantic.ReadOnly == nil &&
+		semantic.DryRun == nil && semantic.PageAll == nil && semantic.Upload == nil && semantic.Sanitize == nil &&
+		semantic.Params == nil && semantic.JSONBody == nil && semantic.Unmasked == nil && len(semantic.Scopes) == 0 &&
 		len(semantic.FlagsContains) == 0 && len(semantic.FlagsPrefixes) == 0
 }
 
@@ -3756,6 +3965,27 @@ func hasGhOnlySemanticFields(semantic SemanticMatchSpec) bool {
 		semantic.ExitStatus != nil
 }
 
+func hasGwsSemanticFields(semantic SemanticMatchSpec) bool {
+	return semantic.Service != "" ||
+		len(semantic.ServiceIn) > 0 ||
+		len(semantic.ResourcePath) > 0 ||
+		len(semantic.ResourcePathContains) > 0 ||
+		semantic.Method != "" ||
+		len(semantic.MethodIn) > 0 ||
+		semantic.Helper != nil ||
+		semantic.Mutating != nil ||
+		semantic.Destructive != nil ||
+		semantic.ReadOnly != nil ||
+		semantic.DryRun != nil ||
+		semantic.PageAll != nil ||
+		semantic.Upload != nil ||
+		semantic.Sanitize != nil ||
+		semantic.Params != nil ||
+		semantic.JSONBody != nil ||
+		semantic.Unmasked != nil ||
+		len(semantic.Scopes) > 0
+}
+
 func hasGhNonSharedSemanticFields(semantic SemanticMatchSpec) bool {
 	return semantic.Area != "" ||
 		len(semantic.AreaIn) > 0 ||
@@ -3839,6 +4069,18 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func equalStrings(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func containsTrimmedString(values []string, want string) bool {

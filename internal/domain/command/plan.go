@@ -32,6 +32,7 @@ type Command struct {
 	AWS              *AWSSemantic
 	Kubectl          *KubectlSemantic
 	Gh               *GhSemantic
+	Gws              *GwsSemantic
 	Helmfile         *HelmfileSemantic
 	ArgoCD           *ArgoCDSemantic
 }
@@ -138,6 +139,25 @@ type GhSemantic struct {
 	Debug          bool
 	ExitStatus     bool
 	Flags          []string
+}
+
+type GwsSemantic struct {
+	Service      string
+	ResourcePath []string
+	Method       string
+	Helper       bool
+	Mutating     bool
+	Destructive  bool
+	ReadOnly     bool
+	DryRun       bool
+	PageAll      bool
+	Upload       bool
+	Sanitize     bool
+	Params       bool
+	JSONBody     bool
+	Unmasked     bool
+	Scopes       []string
+	Flags        []string
 }
 
 type HelmfileSemantic struct {

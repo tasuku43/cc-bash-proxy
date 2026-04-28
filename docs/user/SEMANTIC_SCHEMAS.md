@@ -39,6 +39,7 @@ The current registry supports:
 - `aws`
 - `kubectl`
 - `gh`
+- `gws`
 - `helmfile`
 - `argocd`
 
@@ -259,6 +260,61 @@ permission:
           area: workflow
           verb: run
           repo_in: [owner/prod]
+```
+
+## gws
+
+Use Google Workspace CLI semantic fields for dynamic Discovery commands and
+hand-written helper commands. The `gws` command surface is built largely from
+Google Discovery Service, so the parser intentionally exposes generic
+`service`, `resource_path`, and `method` fields rather than a closed enum of
+every API method.
+
+Core fields:
+
+- `service`, `service_in`: first action token after `gws`, such as `drive`,
+  `gmail`, `calendar`, `sheets`, `docs`, `chat`, or `auth`.
+- `resource_path`, `resource_path_contains`: resource tokens between service
+  and method, such as `[files]` or `[spreadsheets, values]`.
+- `method`, `method_in`: final Discovery method or helper command, such as
+  `list`, `get`, `create`, `delete`, `export`, `login`, `+send`, or `+upload`.
+- `helper`: true when the method starts with `+`.
+- `mutating`, `destructive`, `read_only`: conservative method-name
+  classifications.
+- `dry_run`, `page_all`, `upload`, `sanitize`, `params`, `json_body`,
+  `unmasked`: true when the corresponding parser-recognized option is present.
+- `scopes`: scopes selected by `--scopes` or `-s`, split on commas and spaces.
+
+```yaml
+permission:
+  allow:
+    - name: gws drive list files
+      command:
+        name: gws
+        semantic:
+          service: drive
+          resource_path:
+            - files
+          method: list
+      test:
+        allow:
+          - "gws drive files list --params '{\"pageSize\": 5}'"
+        abstain:
+          - "gws drive files delete --params '{\"fileId\":\"abc\"}'"
+
+  deny:
+    - name: gws unmasked credential export
+      command:
+        name: gws
+        semantic:
+          service: auth
+          method: export
+          unmasked: true
+      test:
+        deny:
+          - "gws auth export --unmasked"
+        abstain:
+          - "gws auth login"
 ```
 
 ## helmfile

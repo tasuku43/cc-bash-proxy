@@ -225,6 +225,23 @@ func semanticMap(cmd commandpkg.Command) map[string]any {
 		addString(fields, "verb", cmd.Gh.Verb)
 		addString(fields, "repo", cmd.Gh.Repo)
 		addString(fields, "hostname", cmd.Gh.Hostname)
+	case cmd.Gws != nil:
+		addString(fields, "service", cmd.Gws.Service)
+		if len(cmd.Gws.ResourcePath) > 0 {
+			fields["resource_path"] = cmd.Gws.ResourcePath
+		}
+		addString(fields, "method", cmd.Gws.Method)
+		addBool(fields, "helper", cmd.Gws.Helper)
+		addBool(fields, "mutating", cmd.Gws.Mutating)
+		addBool(fields, "destructive", cmd.Gws.Destructive)
+		addBool(fields, "read_only", cmd.Gws.ReadOnly)
+		addBool(fields, "dry_run", cmd.Gws.DryRun)
+		addBool(fields, "page_all", cmd.Gws.PageAll)
+		addBool(fields, "upload", cmd.Gws.Upload)
+		addBool(fields, "sanitize", cmd.Gws.Sanitize)
+		addBool(fields, "params", cmd.Gws.Params)
+		addBool(fields, "json_body", cmd.Gws.JSONBody)
+		addBool(fields, "unmasked", cmd.Gws.Unmasked)
 	case cmd.Helmfile != nil:
 		addString(fields, "verb", cmd.Helmfile.Verb)
 		addString(fields, "environment", cmd.Helmfile.Environment)

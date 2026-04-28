@@ -1415,6 +1415,50 @@ test:
 	}
 }
 
+func TestRunExplainGwsSemanticFields(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: gws drive list files
+      command:
+        name: gws
+        semantic:
+          service: drive
+          resource_path: [files]
+          method: list
+      test:
+        allow:
+          - "gws drive files list --params '{\"pageSize\": 5}'"
+        abstain:
+          - "gws drive files delete --params '{\"fileId\":\"abc\"}'"
+test:
+  - in: "gws drive files list --params '{\"pageSize\": 5}'"
+    decision: allow
+`)
+	verifyExplainConfig(t, home, cwd, cacheHome)
+
+	code, stdout, stderr := runExplainCLI(t, home, cwd, cacheHome, `gws drive files list --params '{"pageSize": 5}'`)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, want := range []string{
+		"outcome: allow",
+		"name: gws drive list files",
+		"parser: gws",
+		"service: drive",
+		"resource_path: [files]",
+		"method: list",
+		"read_only: true",
+		"params: true",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("explain output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
 func TestRunExplainDenyWithIncludedSource(t *testing.T) {
 	home := t.TempDir()
 	cwd := t.TempDir()

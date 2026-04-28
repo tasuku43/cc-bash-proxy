@@ -32,6 +32,47 @@ func TestEvaluateAWSProfileSemanticDoesNotRewriteCommand(t *testing.T) {
 	}
 }
 
+func TestEvaluateGwsSemanticRules(t *testing.T) {
+	trueValue := true
+	p := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Deny: []PermissionRuleSpec{{
+				Command: PermissionCommandSpec{Name: "gws", Semantic: &SemanticMatchSpec{Service: "auth", Method: "export", Unmasked: &trueValue}},
+			}},
+			Ask: []PermissionRuleSpec{{
+				Command: PermissionCommandSpec{Name: "gws", Semantic: &SemanticMatchSpec{Mutating: &trueValue, DryRun: &trueValue}},
+			}},
+			Allow: []PermissionRuleSpec{
+				{Command: PermissionCommandSpec{Name: "gws", Semantic: &SemanticMatchSpec{Service: "drive", ResourcePath: []string{"files"}, Method: "list"}}},
+				{Command: PermissionCommandSpec{Name: "gws", Semantic: &SemanticMatchSpec{Service: "gmail", Method: "+send", Helper: &trueValue}}},
+			},
+		},
+	}, Source{})
+
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{command: `gws drive files list --params '{"pageSize": 5}'`, want: "allow"},
+		{command: `gws drive files delete --params '{"fileId":"abc"}'`, want: "abstain"},
+		{command: `gws auth export --unmasked`, want: "deny"},
+		{command: `gws chat spaces messages create --params '{"parent":"spaces/xyz"}' --json '{"text":"hello"}' --dry-run`, want: "ask"},
+		{command: `gws gmail +send --to a@example.com --subject hi --body hello`, want: "allow"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			got, err := Evaluate(p, tt.command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != tt.want {
+				t.Fatalf("Outcome = %q, want %q; decision=%+v", got.Outcome, tt.want, got)
+			}
+		})
+	}
+}
+
 func TestEvaluatePermissionUsesOriginalCommandForRawPatterns(t *testing.T) {
 	p := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{

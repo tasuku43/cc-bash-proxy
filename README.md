@@ -7,8 +7,8 @@ Bash commands against YAML policy, merges that result with Claude Code native
 permissions, and returns `allow`, `ask`, or `deny`. In default mode it never
 rewrites commands: parser-backed normalization is used only for evaluation, and
 the command passed through the hook remains the original command. Semantic
-matching for tools such as `git`, `aws`, `kubectl`, `gh`, `helmfile`, and
-`argocd`, plus `verify`, `explain`, and `suggest`, lets humans and coding agents iterate on
+matching for tools such as `git`, `aws`, `kubectl`, `gh`, `gws`, `helmfile`,
+and `argocd`, plus `verify`, `explain`, and `suggest`, lets humans and coding agents iterate on
 policy safely.
 
 `cc-bash-guard` policy evaluation never rewrites commands. The default hook does not emit `updatedInput`.
@@ -308,7 +308,7 @@ permission:
 ```
 
 Supported semantic parsers currently include `git`, `aws`, `kubectl`, `gh`,
-`helmfile`, and `argocd`. Treat `cc-bash-guard help semantic` and
+`gws`, `helmfile`, and `argocd`. Treat `cc-bash-guard help semantic` and
 `cc-bash-guard semantic-schema --format json` as the source of truth for the
 installed binary.
 
@@ -318,6 +318,7 @@ Complete runnable examples:
 - [`examples/git-safe-readonly.yml`](examples/git-safe-readonly.yml)
 - [`examples/aws-identity.yml`](examples/aws-identity.yml)
 - [`examples/kubectl-readonly.yml`](examples/kubectl-readonly.yml)
+- [`examples/gws-readonly.yml`](examples/gws-readonly.yml)
 - [`examples/argocd-app-delete-deny.yml`](examples/argocd-app-delete-deny.yml)
 - [`examples/helmfile-diff-apply.yml`](examples/helmfile-diff-apply.yml)
 
