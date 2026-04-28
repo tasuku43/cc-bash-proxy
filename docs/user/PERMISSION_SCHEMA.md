@@ -54,8 +54,9 @@ Each rule may also set `message`; when that rule determines `allow`, `ask`, or
 
 ## command
 
-Use `command` to match a command by name. For commands with semantic parser
-support, add `command.semantic`.
+Use `command` to match a command by name. Use `name` for one command, or
+`name_in` for a non-semantic OR list of command names. For commands with
+semantic parser support, use `name` plus `command.semantic`.
 
 ```yaml
 permission:
@@ -73,6 +74,24 @@ permission:
 
 The semantic schema is selected by `command.name`. Fields live directly under
 `command.semantic`; no extra tool-name nesting is required.
+
+`name` and `name_in` are mutually exclusive. `name_in` cannot be combined with
+`semantic`; it may be combined with `env`.
+
+```yaml
+permission:
+  allow:
+    - name: read-only shell basics
+      command:
+        name_in:
+          - ls
+          - pwd
+          - head
+          - tail
+          - wc
+          - grep
+          - rg
+```
 
 Inspect supported commands with:
 
@@ -107,21 +126,22 @@ variable must not be present.
 Use `patterns` for raw regular expression matching against the original command
 string and parsed command elements. Shell `-c` wrappers are unwrapped for
 evaluation, so a pattern such as `^aws(\s|$)` also matches
-`bash -c 'aws s3 ls'`. This is the fallback for commands without semantic
-support.
+`bash -c 'aws s3 ls'`. This is the fallback for raw-string checks or commands
+that cannot be expressed with `command.name_in`.
 
 Prefer `command` plus `command.semantic` when a command is listed by
-`cc-bash-guard help semantic`. Pattern rules are best used for commands that do
-not have semantic parsers, or for deliberate raw-string checks.
+`cc-bash-guard help semantic`. Pattern rules are best used for deliberate
+raw-string checks.
 
 ```yaml
 permission:
   allow:
     - name: read-only shell basics
-      patterns:
-        - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|`$()]+$"
-        - "^pwd$"
-        - "^cat\\s+[^;&|`$()]+$"
+      command:
+        name_in:
+          - ls
+          - pwd
+          - cat
 ```
 
 Safer pattern rules are narrow and test-backed:
@@ -139,9 +159,10 @@ Safer pattern rules are narrow and test-backed:
 warnings when a regex is unanchored, allows a whole command namespace, or uses
 broad wildcards that can match shell metacharacters. These remain warnings so
 existing valid policies keep loading, but the safer fix is usually
-`command.semantic` for supported commands or a narrower anchored regex.
+`command.name_in`, `command.semantic` for supported commands, or a narrower
+anchored regex.
 
-Example fallback for a command without semantic support:
+Example fallback for a command that needs raw-string subcommand checks:
 
 ```yaml
 permission:

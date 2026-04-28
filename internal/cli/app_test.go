@@ -1885,6 +1885,56 @@ test:
 	}
 }
 
+func TestRunVerifySupportsCommandNameIn(t *testing.T) {
+	home := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: read-only coreutils
+      command:
+        name_in:
+          - cd
+          - ls
+          - pwd
+          - head
+          - tail
+          - wc
+          - grep
+          - rg
+      test:
+        allow:
+          - "ls"
+          - "ls -la /tmp"
+          - "/bin/ls -la"
+          - "bash -c 'ls -la'"
+          - "cd /tmp && ls"
+        pass:
+          - "rm -rf /tmp"
+          - "git status"
+test:
+  - in: "ls"
+    decision: allow
+  - in: "/bin/ls -la"
+    decision: allow
+  - in: "bash -c 'ls -la'"
+    decision: allow
+  - in: "cd /tmp && ls"
+    decision: allow
+  - in: "rm -rf /tmp"
+    decision: ask
+  - in: "git status"
+    decision: ask
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"verify"}, Streams{Stdout: &stdout, Stderr: &stderr}, Env{Cwd: t.TempDir(), Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "PASS verify") {
+		t.Fatalf("stdout missing PASS verify:\n%s", stdout.String())
+	}
+}
+
 func TestRunVerifyColorBehavior(t *testing.T) {
 	home := t.TempDir()
 	writeUserConfig(t, home, `permission:

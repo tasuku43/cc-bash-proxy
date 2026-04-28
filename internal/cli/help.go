@@ -248,13 +248,15 @@ Start with deny rules for dangerous commands, allow rules for known safe
 commands, and ask rules for commands that need review.
 
 Rule fields:
-  command   Match a command by name and, when supported, command-specific semantic fields.
+  command   Match a command by name/name_in and, when supported, command-specific semantic fields.
   env       Match environment variables required or missing for the invocation.
   patterns  Match the raw command string with one or more regular expressions.
 
 Valid combinations:
-  command
-  command + env
+  command (name)
+  command (name) + env
+  command (name_in)
+  command (name_in) + env
   command + semantic
   command + semantic + env
   patterns
@@ -264,9 +266,10 @@ Valid combinations:
 When to use each matcher:
   Use command.semantic for commands listed by cc-bash-guard help semantic.
   The semantic schema is selected by command.name.
+  Use command.name_in for a non-semantic OR list of command names.
   Semantic fields live directly under command.semantic; no extra tool-name
   nesting is required because command.name is the discriminator.
-  Use patterns for commands without semantic support or for raw regex fallbacks.
+  Use patterns for raw regex fallbacks that cannot be expressed with name_in.
   Use env when a rule depends on variables such as AWS_PROFILE.
   Put rules under permission.deny, permission.ask, or permission.allow.
   Do not combine command and patterns in the same rule.
@@ -295,9 +298,13 @@ Example:
             - AWS_PROFILE
 
       - name: read-only basics
-        patterns:
-          - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|$()]+$"
-          - "^pwd$"
+        command:
+          name_in:
+            - ls
+            - pwd
+            - head
+            - tail
+            - wc
 
 Docs:
   docs/user/PERMISSION_SCHEMA.md
@@ -368,9 +375,13 @@ Read-only shell basics:
   permission:
     allow:
       - name: read-only shell basics
-        patterns:
-          - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|$()]+$"
-          - "^pwd$"
+        command:
+          name_in:
+            - ls
+            - pwd
+            - head
+            - tail
+            - wc
 
 Unknown command fallback:
   permission:
@@ -501,6 +512,20 @@ Decision order:
 Permission rule example:
   permission:
     allow:
+      - command:
+          name_in:
+            - ls
+            - pwd
+            - head
+            - tail
+            - wc
+        test:
+          allow:
+            - "/bin/ls -la"
+            - "bash -c 'pwd'"
+          pass:
+            - "rm -rf /tmp"
+
       - command:
           name: aws
           semantic:

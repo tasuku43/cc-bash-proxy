@@ -2360,6 +2360,20 @@ func TestEvaluatePermissionPredicateCombinations(t *testing.T) {
 			want:    "allow",
 		},
 		{
+			name:    "command name_in allow",
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{NameIn: []string{"ls", "pwd", "wc"}}},
+			effect:  "allow",
+			command: "/bin/ls -la /tmp",
+			want:    "allow",
+		},
+		{
+			name:    "command name_in env allow",
+			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{NameIn: []string{"ls", "pwd"}}, Env: PermissionEnvSpec{Requires: []string{"SAFE_READONLY"}}},
+			effect:  "allow",
+			command: "SAFE_READONLY=1 pwd",
+			want:    "allow",
+		},
+		{
 			name:    "command semantic deny",
 			rule:    PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "push", Force: boolPtr(true)}}},
 			effect:  "deny",
@@ -2424,6 +2438,50 @@ func TestEvaluatePermissionPredicateCombinations(t *testing.T) {
 	}
 }
 
+func TestEvaluatePermissionCommandNameInReadOnlyBasics(t *testing.T) {
+	pipeline := NewPipeline(PipelineSpec{
+		Permission: PermissionSpec{
+			Allow: []PermissionRuleSpec{{
+				Name: "read-only basics",
+				Command: PermissionCommandSpec{NameIn: []string{
+					"cd",
+					"grep",
+					"head",
+					"ls",
+					"pwd",
+					"tail",
+					"wc",
+				}},
+			}},
+		},
+	}, Source{})
+
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{command: "ls", want: "allow"},
+		{command: "ls -la /tmp", want: "allow"},
+		{command: "/bin/ls -la", want: "allow"},
+		{command: "bash -c 'ls -la'", want: "allow"},
+		{command: "cd /tmp && ls", want: "allow"},
+		{command: "rm -rf /tmp", want: "abstain"},
+		{command: "git status", want: "abstain"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			got, err := Evaluate(pipeline, tt.command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != tt.want {
+				t.Fatalf("Outcome=%q want %q decision=%+v", got.Outcome, tt.want, got)
+			}
+		})
+	}
+}
+
 func TestEvaluatePermissionCommandEnvDenyDoesNotOverrideDifferentCommandAsk(t *testing.T) {
 	pipeline := NewPipeline(PipelineSpec{
 		Permission: PermissionSpec{
@@ -2463,6 +2521,21 @@ func TestValidatePermissionPredicateInvalidForms(t *testing.T) {
 			name:  "command patterns invalid",
 			rule:  PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git"}, Patterns: []string{`^git`}},
 			issue: "permission.allow[0] cannot combine command and patterns",
+		},
+		{
+			name:  "command name and name_in invalid",
+			rule:  PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", NameIn: []string{"gh"}}},
+			issue: "permission.allow[0].command.name and permission.allow[0].command.name_in cannot both be set",
+		},
+		{
+			name:  "empty command name_in invalid",
+			rule:  PermissionRuleSpec{Command: PermissionCommandSpec{NameIn: []string{"ls", ""}}},
+			issue: "permission.allow[0].command.name_in[1] must be non-empty",
+		},
+		{
+			name:  "command name_in semantic invalid",
+			rule:  PermissionRuleSpec{Command: PermissionCommandSpec{NameIn: []string{"git", "gh"}, Semantic: &SemanticMatchSpec{Verb: "status"}}},
+			issue: "permission.allow[0].command.name_in cannot be used with semantic",
 		},
 		{
 			name:  "semantic without command name invalid",

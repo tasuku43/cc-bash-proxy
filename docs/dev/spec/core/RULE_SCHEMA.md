@@ -71,7 +71,9 @@ permission:
 ```
 
 Rules may combine `command + env` or `patterns + env`. `command + patterns` is
-invalid.
+invalid. `command.name` matches one command. `command.name_in` matches a
+non-semantic OR list of command names and may combine only with `env`; it is
+mutually exclusive with `command.name` and `command.semantic`.
 
 Top-level `test` asserts final permission decision only:
 

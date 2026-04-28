@@ -39,6 +39,7 @@ type PermissionRuleSpec struct {
 
 type PermissionCommandSpec struct {
 	Name     string             `yaml:"name" json:"name,omitempty"`
+	NameIn   []string           `yaml:"name_in" json:"name_in,omitempty"`
 	Semantic *SemanticMatchSpec `yaml:"semantic" json:"semantic,omitempty"`
 }
 
@@ -1445,7 +1446,13 @@ func permissionCommandStructuralScopeMatches(command PermissionCommandSpec, env 
 	if cmd.Program == "" {
 		return false
 	}
-	if strings.TrimSpace(command.Name) == "" || cmd.Program != strings.TrimSpace(command.Name) {
+	if strings.TrimSpace(command.Name) != "" {
+		if cmd.Program != strings.TrimSpace(command.Name) {
+			return false
+		}
+		return permissionEnvMatches(env, cmd)
+	}
+	if len(command.NameIn) == 0 || !containsTrimmedString(command.NameIn, cmd.Program) {
 		return false
 	}
 	return permissionEnvMatches(env, cmd)
@@ -1486,7 +1493,7 @@ func permissionSemanticMatches(command string, semantic SemanticMatchSpec, cmd c
 
 func permissionPredicateSummary(rule PermissionRuleSpec) string {
 	var groups []string
-	if strings.TrimSpace(rule.Command.Name) != "" {
+	if strings.TrimSpace(rule.Command.Name) != "" || len(rule.Command.NameIn) > 0 {
 		groups = append(groups, "command")
 		if rule.Command.Semantic != nil {
 			groups = append(groups, "semantic")
@@ -1540,8 +1547,19 @@ func PermissionRuleMatches(rule PermissionRuleSpec, command string) bool {
 func PermissionAllowRuleMatches(rule PermissionRuleSpec, command string) bool {
 	selector := preparePermissionSelector(rule)
 	if selector.hasCommandSelector() {
-		_, ok := selector.matchesCommand(command)
-		return allowRuleCanMatch(rule, command) && ok
+		plan := commandpkg.Parse(command)
+		if !commandpkg.IsSafeForEvaluation(plan) {
+			return false
+		}
+		if len(plan.Commands) == 0 {
+			return false
+		}
+		for _, cmd := range plan.Commands {
+			if !selector.matchesCommandValue(cmd) {
+				return false
+			}
+		}
+		return true
 	}
 	plan := commandpkg.Parse(command)
 	prepared := preparedPermissionRule{Spec: rule, Selector: selector}
@@ -1628,7 +1646,7 @@ func (s preparedSelector) matchesStructuredCommand(cmd commandpkg.Command) bool 
 }
 
 func (s preparedPermissionSelector) hasCommandSelector() bool {
-	return strings.TrimSpace(s.Command.Name) != ""
+	return strings.TrimSpace(s.Command.Name) != "" || len(s.Command.NameIn) > 0
 }
 
 func (s preparedPermissionSelector) matchesCommand(command string) (commandpkg.Command, bool) {
@@ -2881,10 +2899,22 @@ func ValidatePermissionPredicates(prefix string, rule PermissionRuleSpec, effect
 
 func ValidatePermissionCommandSpec(prefix string, command PermissionCommandSpec) []string {
 	var issues []string
+	if command.Name != "" && len(command.NameIn) > 0 {
+		issues = append(issues, prefix+".name and "+prefix+".name_in cannot both be set")
+	}
 	if strings.TrimSpace(command.Name) == "" {
-		issues = append(issues, prefix+".name must be non-empty")
+		if command.Name != "" {
+			issues = append(issues, prefix+".name must be non-empty")
+		}
+	}
+	issues = append(issues, validateNonEmptyStrings(prefix+".name_in", command.NameIn)...)
+	if strings.TrimSpace(command.Name) == "" && len(command.NameIn) == 0 {
+		issues = append(issues, prefix+".name or "+prefix+".name_in must be set")
 	}
 	if command.Semantic != nil {
+		if len(command.NameIn) > 0 {
+			issues = append(issues, prefix+".name_in cannot be used with semantic")
+		}
 		if strings.TrimSpace(command.Name) == "" {
 			issues = append(issues, prefix+".name must be set when semantic is used")
 			return issues
@@ -3370,7 +3400,7 @@ func IsZeroPermissionSpec(spec PermissionSpec) bool {
 }
 
 func IsZeroPermissionCommandSpec(command PermissionCommandSpec) bool {
-	return command.Name == "" && command.Semantic == nil
+	return command.Name == "" && len(command.NameIn) == 0 && command.Semantic == nil
 }
 
 func IsZeroPermissionEnvSpec(env PermissionEnvSpec) bool {
@@ -3711,6 +3741,15 @@ func validateNonEmptyStrings(prefix string, values []string) []string {
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsTrimmedString(values []string, want string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == want {
 			return true
 		}
 	}

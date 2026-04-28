@@ -264,7 +264,9 @@ merge behavior. For compound commands such as `A && B`, permission sources are
 merged for each command element before the compound decision is aggregated.
 
 Each rule uses `command`, `env`, or `patterns`. `command` and `patterns` cannot
-be combined in one rule. `env` can be combined with either. Shell `-c`
+be combined in one rule. `env` can be combined with either. `command.name`
+matches one command, while `command.name_in` matches a non-semantic OR list of
+command names. Shell `-c`
 wrappers such as `bash -c 'aws s3 ls'` are unwrapped for evaluation:
 `command` rules and `patterns` rules both evaluate the inner command while the
 executed command string is preserved.
@@ -307,31 +309,41 @@ determines `allow`, `ask`, or `deny`.
 
 `command.name` selects the semantic parser. Fields under `command.semantic`
 are interpreted in that parser's namespace, so no extra tool-name nesting under
-`semantic` is required.
+`semantic` is required. `command.name_in` is mutually exclusive with
+`command.name` and cannot be combined with `command.semantic`.
 
-Use `patterns` for commands without a semantic parser, including read-only
-basics such as `ls`, `cat`, `grep`, `head`, `tail`, and `pwd`. Patterns match
-the original command string and each parsed command element, including shell
-`-c` inner commands:
+Use `command.name_in` for non-semantic command-name lists, including read-only
+basics such as `ls`, `cat`, `grep`, `head`, `tail`, and `pwd`. It uses the same
+parser-backed command name normalization as `command.name`, so `/bin/ls` matches
+`ls`. Shell `-c` inner commands and compound command elements are evaluated per
+command:
 
 ```yaml
 permission:
   allow:
     - name: read-only shell basics
-      patterns:
-        - "^ls(\\s+-[A-Za-z0-9]+)?\\s+[^;&|`$()]+$"
-        - "^pwd$"
-        - "^cat\\s+[^;&|`$()]+$"
-        - "^head\\s+[^;&|`$()]+$"
-        - "^tail\\s+[^;&|`$()]+$"
+      command:
+        name_in:
+          - ls
+          - pwd
+          - cat
+          - head
+          - tail
+          - wc
+          - grep
+          - rg
 ```
+
+Use `patterns` for deliberate raw-string checks or commands that cannot be
+expressed with `command.name_in`.
 
 ### Safe Pattern Rules
 
-`patterns` are a fallback for commands that do not have command-specific
-semantic parsers. Prefer `command` plus `command.semantic` for supported tools
-such as `git`, `gh`, `aws`, `kubectl`, `helmfile`, and `argocd`; those rules
-can distinguish read-only operations from destructive ones.
+`patterns` are a fallback for raw-string checks. Prefer `command.name_in` for
+simple non-semantic command-name lists. Prefer `command` plus
+`command.semantic` for supported tools such as `git`, `gh`, `aws`, `kubectl`,
+`helmfile`, and `argocd`; those rules can distinguish read-only operations from
+destructive ones.
 
 When you do need `patterns`, keep them narrow:
 
@@ -349,7 +361,8 @@ When you do need `patterns`, keep them narrow:
 `cc-bash-guard verify` warns about broad `permission.allow[*].patterns`, such
 as unanchored regexes, whole tool namespaces, and broad wildcards that can
 match shell metacharacters. These warnings do not reject the policy; they point
-to `command.semantic` for supported commands or to narrower anchored regexes.
+to `command.name_in`, `command.semantic` for supported commands, or to narrower
+anchored regexes.
 
 Use top-level `test` entries with `cc-bash-guard verify` to pin both safe and
 unsafe examples:
