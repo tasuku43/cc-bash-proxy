@@ -169,6 +169,125 @@ func TestSecurityRegressionMatrixEvaluationBoundaries(t *testing.T) {
 	}
 }
 
+func TestUnsafeShellShapesDoNotBecomeStructuredAllow(t *testing.T) {
+	allowVisibleCommands := PermissionSpec{Allow: []PermissionRuleSpec{
+		{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}},
+		{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "diff"}}},
+		{Command: PermissionCommandSpec{Name: "echo"}},
+		{Command: PermissionCommandSpec{Name: "cat"}},
+	}}
+
+	tests := []string{
+		"git status > /tmp/out",
+		"echo $(git status)",
+		"cat <(git status)",
+		"(git status)",
+		"git status &",
+		"git status && (git diff)",
+	}
+
+	p := NewPipeline(PipelineSpec{Permission: allowVisibleCommands}, Source{})
+	for _, command := range tests {
+		t.Run(command, func(t *testing.T) {
+			got, err := Evaluate(p, command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome == "allow" {
+				t.Fatalf("unsafe shell shape was auto-allowed; decision=%+v", got)
+			}
+		})
+	}
+}
+
+func TestSupportedWrappersDoNotHideDangerousInnerCommands(t *testing.T) {
+	force := true
+	p := NewPipeline(PipelineSpec{Permission: PermissionSpec{
+		Deny: []PermissionRuleSpec{{
+			Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "push", Force: &force}},
+		}},
+		Allow: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git"}}},
+	}}, Source{})
+
+	tests := []string{
+		"bash -c 'git push --force origin main'",
+		"sh -c 'git push --force origin main'",
+		"/bin/bash -c 'git push --force origin main'",
+		"env bash -c 'git push --force origin main'",
+		"command bash -c 'git push --force origin main'",
+		"sudo -u root bash -c 'git push --force origin main'",
+		"timeout 10 bash -c 'git push --force origin main'",
+		"busybox sh -c 'git push --force origin main'",
+	}
+
+	for _, command := range tests {
+		t.Run(command, func(t *testing.T) {
+			got, err := Evaluate(p, command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != "deny" {
+				t.Fatalf("Outcome = %q, want deny; decision=%+v", got.Outcome, got)
+			}
+		})
+	}
+}
+
+func TestSemanticParserFallbackDoesNotWidenSemanticRuleToCommandAllow(t *testing.T) {
+	force := true
+	p := NewPipeline(PipelineSpec{Permission: PermissionSpec{
+		Allow: []PermissionRuleSpec{{
+			Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "push", Force: &force}},
+		}},
+	}}, Source{})
+
+	cmd := commandpkg.NewInvocation("git push --force origin main")
+	parsed, ok := commandpkg.NewCommandParserRegistry().Parse(cmd)
+	if !ok {
+		t.Fatal("generic parser did not parse git command")
+	}
+	if parsed.SemanticParser != "" || parsed.Git != nil {
+		t.Fatalf("test setup expected generic command without git semantic fields; cmd=%+v", parsed)
+	}
+
+	decision := evaluatePreparedCommand(p.prepared.Deny, p.prepared.Ask, p.prepared.Allow, parsed)
+	if decision.Outcome == "allow" {
+		t.Fatalf("semantic parser fallback widened semantic allow; decision=%+v cmd=%+v", decision, parsed)
+	}
+	if decision.Outcome != "ask" {
+		t.Fatalf("Outcome = %q, want ask; decision=%+v", decision.Outcome, decision)
+	}
+}
+
+func TestPermissionPrecedenceProperties(t *testing.T) {
+	gitStatus := PermissionRuleSpec{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "status"}}}
+	tests := []struct {
+		name       string
+		permission PermissionSpec
+		command    string
+		want       string
+	}{
+		{name: "deny beats ask", permission: PermissionSpec{Deny: []PermissionRuleSpec{gitStatus}, Ask: []PermissionRuleSpec{gitStatus}}, command: "git status", want: "deny"},
+		{name: "deny beats allow", permission: PermissionSpec{Deny: []PermissionRuleSpec{gitStatus}, Allow: []PermissionRuleSpec{gitStatus}}, command: "git status", want: "deny"},
+		{name: "ask beats allow", permission: PermissionSpec{Ask: []PermissionRuleSpec{gitStatus}, Allow: []PermissionRuleSpec{gitStatus}}, command: "git status", want: "ask"},
+		{name: "all abstain stays abstain", permission: PermissionSpec{Allow: []PermissionRuleSpec{{Command: PermissionCommandSpec{Name: "git", Semantic: &SemanticMatchSpec{Verb: "diff"}}}}}, command: "git status", want: "abstain"},
+		{name: "unsafe fallback asks", permission: PermissionSpec{Allow: []PermissionRuleSpec{gitStatus}}, command: "git status > /tmp/out", want: "ask"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewPipeline(PipelineSpec{Permission: tt.permission}, Source{})
+			got, err := Evaluate(p, tt.command)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if got.Outcome != tt.want {
+				t.Fatalf("Outcome = %q, want %q; decision=%+v", got.Outcome, tt.want, got)
+			}
+		})
+	}
+}
+
 func TestSecurityRegressionMatrixParserBoundaries(t *testing.T) {
 	tests := []struct {
 		name           string

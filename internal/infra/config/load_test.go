@@ -205,6 +205,52 @@ test:
 	}
 }
 
+func TestLoadEffectiveRejectsMalformedYAMLWithoutPanic(t *testing.T) {
+	home := t.TempDir()
+	userPath := filepath.Join(home, ".config", "cc-bash-guard", "cc-bash-guard.yml")
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte("permission:\n  allow:\n    - command: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := LoadEffective(home, "")
+	if len(loaded.Errors) == 0 {
+		t.Fatal("expected invalid YAML error")
+	}
+	if !strings.Contains(loaded.Errors[0].Error(), "invalid") {
+		t.Fatalf("error=%v, want actionable invalid config error", loaded.Errors[0])
+	}
+}
+
+func TestLoadEffectiveRejectsUnknownFieldsWithKnownFields(t *testing.T) {
+	home := t.TempDir()
+	userPath := filepath.Join(home, ".config", "cc-bash-guard", "cc-bash-guard.yml")
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte(`permission:
+  allow:
+    - command:
+        name: git
+        pattern: status
+test:
+  - in: "git status"
+    decision: allow
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := LoadEffective(home, "")
+	if len(loaded.Errors) == 0 {
+		t.Fatal("expected unknown field error")
+	}
+	if !strings.Contains(loaded.Errors[0].Error(), "field pattern not found") {
+		t.Fatalf("error=%v, want KnownFields diagnostic", loaded.Errors[0])
+	}
+}
+
 func TestLoadEffectiveRejectsInvalidGhSemanticYAML(t *testing.T) {
 	tests := []struct {
 		name string
