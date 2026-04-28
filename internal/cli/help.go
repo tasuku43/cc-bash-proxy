@@ -270,7 +270,9 @@ RTK integration:
   If you use RTK rewriting, use cc-bash-guard hook --rtk as the single Bash hook.
   Do not register RTK as a second Bash hook.
   cc-bash-guard evaluates permissions first, then invokes external rtk rewrite
-  only when the merged decision is not deny. Deny never invokes RTK.
+  only when the merged decision is not deny. It emits updatedInput only when RTK
+  returns a different command, preserving the Claude tool_input object and
+  replacing only command. Deny never invokes RTK.
 
 `)
 	case "explain":

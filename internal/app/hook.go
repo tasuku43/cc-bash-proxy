@@ -26,7 +26,7 @@ func RunHook(raw []byte, opts HookOptions, env Env) HookResult {
 		decision = applyRTKRewrite(decision)
 	}
 
-	return HookResult{Payload: hookPayload(decision, req.Command)}
+	return HookResult{Payload: hookPayload(decision, req)}
 }
 
 func evaluateDecision(req hookinput.ExecRequest, env Env, autoVerify bool) (policy.Decision, error) {
@@ -58,7 +58,7 @@ func ensureVerifiedArtifacts(env Env, tool string) error {
 	return err
 }
 
-func hookPayload(decision policy.Decision, originalCommand string) map[string]any {
+func hookPayload(decision policy.Decision, req hookinput.ExecRequest) map[string]any {
 	switch decision.Outcome {
 	case "allow", "ask":
 		hookOutput := map[string]any{
@@ -67,8 +67,8 @@ func hookPayload(decision policy.Decision, originalCommand string) map[string]an
 		}
 		// updatedInput is reserved for hook --rtk after a non-deny decision.
 		// Policy evaluation and the default hook never rewrite commands.
-		if decision.Command != originalCommand {
-			hookOutput["updatedInput"] = map[string]any{"command": decision.Command}
+		if decision.Command != req.Command {
+			hookOutput["updatedInput"] = updatedInput(req, decision.Command)
 		}
 		if decision.Outcome == "allow" {
 			hookOutput["permissionDecision"] = "allow"
@@ -106,6 +106,18 @@ func hookPayload(decision policy.Decision, originalCommand string) map[string]an
 	default:
 		return hookErrorPayload(claude.Tool, "runtime_error", "unsupported decision outcome")
 	}
+}
+
+func updatedInput(req hookinput.ExecRequest, command string) map[string]any {
+	if req.OriginalToolInput == nil {
+		return map[string]any{"command": command}
+	}
+	out := make(map[string]any, len(req.OriginalToolInput))
+	for key, value := range req.OriginalToolInput {
+		out[key] = value
+	}
+	out["command"] = command
+	return out
 }
 
 func permissionDecisionReason(decision policy.Decision, fallback string) string {

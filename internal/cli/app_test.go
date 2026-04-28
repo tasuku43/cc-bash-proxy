@@ -126,6 +126,49 @@ func runClaudeHookMapTest(t *testing.T, spec hookEnvSpec) map[string]any {
 	return payload
 }
 
+func runClaudeHookMapRawTest(t *testing.T, spec hookEnvSpec, stdin string) map[string]any {
+	t.Helper()
+	home := t.TempDir()
+	cwd := t.TempDir()
+
+	if spec.UserConfig != "" {
+		writeUserConfig(t, home, spec.UserConfig)
+	}
+	if spec.LocalConfig != "" {
+		writeProjectConfig(t, cwd, spec.LocalConfig)
+	}
+	if spec.ClaudeSettings != "" {
+		writeClaudeSettings(t, home, spec.ClaudeSettings)
+	}
+	if spec.ClaudeLocalSettings != "" {
+		writeProjectClaudeLocalSettings(t, cwd, spec.ClaudeLocalSettings)
+	}
+
+	args := []string{"hook"}
+	if spec.UseRTK {
+		args = append(args, "--rtk")
+	}
+	if !spec.DisableAutoVerify {
+		args = append(args, "--auto-verify")
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run(args, Streams{
+		Stdin:  strings.NewReader(stdin),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, Env{Cwd: cwd, Home: home})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json error: %v stdout=%s", err, stdout.String())
+	}
+	return payload
+}
+
 func TestRunHookClaudeAllowReturnsAllowWithoutUpdatedInput(t *testing.T) {
 	home := t.TempDir()
 	writeClaudeSettings(t, home, `{
@@ -356,6 +399,90 @@ test:
 	}
 }
 
+func TestRunHookClaudeRTKPreservesToolInputDescription(t *testing.T) {
+	toolDir := t.TempDir()
+	rtkPath := filepath.Join(toolDir, "rtk")
+	script := "#!/bin/sh\nif [ \"$1\" = \"rewrite\" ]; then\n  printf 'rtk %s\\n' \"$2\"\n  exit 0\nfi\nexit 1\n"
+	if err := os.WriteFile(rtkPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fmt.Sprintf("%s:%s", toolDir, os.Getenv("PATH")))
+
+	payload := runClaudeHookMapRawTest(t, hookEnvSpec{
+		UserConfig: `permission:
+  allow:
+    - command:
+        name: git
+        semantic:
+          verb: diff
+      test:
+        allow:
+          - "git diff goal.md"
+        abstain:
+          - "git status"
+test:
+  - in: "git diff goal.md"
+    decision: allow
+`,
+		UseRTK: true,
+	}, `{"tool_name":"Bash","tool_input":{"command":"git diff goal.md","description":"Review local changes"}}`)
+
+	hookOut := payload["hookSpecificOutput"].(map[string]any)
+	updatedInput := hookOut["updatedInput"].(map[string]any)
+	if updatedInput["command"] != "rtk git diff goal.md" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if updatedInput["description"] != "Review local changes" {
+		t.Fatalf("expected description to be preserved, payload=%+v", payload)
+	}
+}
+
+func TestRunHookClaudeRTKPreservesUnknownToolInputFields(t *testing.T) {
+	toolDir := t.TempDir()
+	rtkPath := filepath.Join(toolDir, "rtk")
+	script := "#!/bin/sh\nif [ \"$1\" = \"rewrite\" ]; then\n  printf 'rtk %s\\n' \"$2\"\n  exit 0\nfi\nexit 1\n"
+	if err := os.WriteFile(rtkPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fmt.Sprintf("%s:%s", toolDir, os.Getenv("PATH")))
+
+	payload := runClaudeHookMapRawTest(t, hookEnvSpec{
+		UserConfig: `permission:
+  allow:
+    - command:
+        name: git
+        semantic:
+          verb: diff
+      test:
+        allow:
+          - "git diff goal.md"
+        abstain:
+          - "git status"
+test:
+  - in: "git diff goal.md"
+    decision: allow
+`,
+		UseRTK: true,
+	}, `{"tool_name":"Bash","tool_input":{"command":"git diff goal.md","extra_string":"keep me","extra_object":{"enabled":true},"extra_list":["a","b"]}}`)
+
+	hookOut := payload["hookSpecificOutput"].(map[string]any)
+	updatedInput := hookOut["updatedInput"].(map[string]any)
+	if updatedInput["command"] != "rtk git diff goal.md" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if updatedInput["extra_string"] != "keep me" {
+		t.Fatalf("expected extra_string to be preserved, payload=%+v", payload)
+	}
+	extraObject, ok := updatedInput["extra_object"].(map[string]any)
+	if !ok || extraObject["enabled"] != true {
+		t.Fatalf("expected extra_object to be preserved, payload=%+v", payload)
+	}
+	extraList, ok := updatedInput["extra_list"].([]any)
+	if !ok || len(extraList) != 2 || extraList[0] != "a" || extraList[1] != "b" {
+		t.Fatalf("expected extra_list to be preserved, payload=%+v", payload)
+	}
+}
+
 func TestRunHookClaudeRTKOmittedUpdatedInputWhenCommandUnchanged(t *testing.T) {
 	toolDir := t.TempDir()
 	markerPath := filepath.Join(toolDir, "called")
@@ -428,6 +555,9 @@ test:
 	hookOut := payload["hookSpecificOutput"].(map[string]any)
 	if hookOut["permissionDecision"] != "deny" {
 		t.Fatalf("payload = %+v", payload)
+	}
+	if _, ok := hookOut["updatedInput"]; ok {
+		t.Fatalf("deny must not emit updatedInput, payload=%+v", payload)
 	}
 	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
 		t.Fatalf("rtk should not run after deny, stat err=%v", err)

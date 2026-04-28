@@ -98,9 +98,11 @@ The runtime outcomes are:
 `deny`, Claude Code feeds the reason back to Claude. For `allow` and `ask`, the
 reason is user-facing.
 
-`updatedInput.command` is emitted only for the explicit `--rtk` integration when
-external RTK returns a different command after a non-`deny` decision.
-cc-bash-guard policy evaluation and the default hook do not rewrite commands.
+`updatedInput` is emitted only for the explicit `--rtk` integration when
+external RTK returns a different command after a non-`deny` decision. For Claude
+Code Bash payloads, `updatedInput` preserves the original `tool_input` object
+and replaces only `command`. cc-bash-guard policy evaluation and the default
+hook do not rewrite commands.
 
 ## 4. Exit Codes
 

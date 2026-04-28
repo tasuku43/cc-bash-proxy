@@ -466,7 +466,10 @@ uncertain.
 
 With `--rtk`, cc-bash-guard evaluates permissions first. If the merged decision
 is not `deny`, it invokes external `rtk rewrite` once and emits
-`updatedInput.command` only when RTK returns a different command. A `deny` decision never invokes RTK. Do not register RTK as a second Bash hook.
+`updatedInput` only when RTK returns a different command. For Claude Code Bash
+payloads, `updatedInput` preserves the original `tool_input` object and replaces
+only `command`. The default hook is policy-only and never emits `updatedInput`.
+A `deny` decision never invokes RTK. Do not register RTK as a second Bash hook.
 
 Top-level `rewrite` is not supported; if a config contains top-level `rewrite`, `verify` fails with migration guidance.
 

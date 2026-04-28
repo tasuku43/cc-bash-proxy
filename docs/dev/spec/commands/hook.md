@@ -19,8 +19,9 @@ Runtime flow:
 5. merge `cc-bash-guard` policy with Claude settings as permission sources
    using `deny > ask > allow > abstain`
 6. when `--rtk` is enabled and the merged decision is not `deny`, invoke
-   external `rtk rewrite` once and emit `updatedInput.command` only when RTK
-   returns a different command
+   external `rtk rewrite` once and emit `updatedInput` only when RTK returns a
+   different command. For Claude Code Bash payloads, `updatedInput` preserves
+   the original `tool_input` object and replaces only `command`
 7. emit Claude Code `PreToolUse` hook JSON for `allow`, `ask`, `deny`, or
    fail-closed error output
 

@@ -8,8 +8,9 @@ import (
 )
 
 type ExecRequest struct {
-	Action  string `json:"action"`
-	Command string `json:"command"`
+	Action            string         `json:"action"`
+	Command           string         `json:"command"`
+	OriginalToolInput map[string]any `json:"-"`
 }
 
 type genericInput struct {
@@ -18,10 +19,8 @@ type genericInput struct {
 }
 
 type claudeInput struct {
-	ToolName  string `json:"tool_name"`
-	ToolInput struct {
-		Command string `json:"command"`
-	} `json:"tool_input"`
+	ToolName  string         `json:"tool_name"`
+	ToolInput map[string]any `json:"tool_input"`
 }
 
 func Normalize(raw []byte) (ExecRequest, error) {
@@ -42,10 +41,11 @@ func Normalize(raw []byte) (ExecRequest, error) {
 		if in.ToolName != "Bash" {
 			return ExecRequest{}, fmt.Errorf("unsupported tool_name %q", in.ToolName)
 		}
-		if strings.TrimSpace(in.ToolInput.Command) == "" {
+		command, ok := in.ToolInput["command"].(string)
+		if !ok || strings.TrimSpace(command) == "" {
 			return ExecRequest{}, errors.New("tool_input.command must be non-empty")
 		}
-		return ExecRequest{Action: "exec", Command: in.ToolInput.Command}, nil
+		return ExecRequest{Action: "exec", Command: command, OriginalToolInput: in.ToolInput}, nil
 	}
 
 	if _, ok := probe["action"]; ok {
