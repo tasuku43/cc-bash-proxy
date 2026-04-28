@@ -282,15 +282,17 @@ It uses the verified policy artifact used by the hook, so run verify after
 editing policy or included policy files.
 
 Usage:
-  cc-bash-guard explain [--format text|json] "<command>"
+  cc-bash-guard explain [--format text|json] [--why-not allow|ask|deny] "<command>"
 
 Examples:
   cc-bash-guard explain "git status"
   cc-bash-guard explain --format json "git push --force origin main"
+  cc-bash-guard explain --why-not allow "git status > /tmp/out"
 
 Notes:
   - text output is for humans
   - JSON output is stable enough for tooling and tests
+  - --why-not explains why the final outcome was not the requested outcome
   - stale or missing verified artifacts fail with a hint to run verify
 `)
 	case "suggest":

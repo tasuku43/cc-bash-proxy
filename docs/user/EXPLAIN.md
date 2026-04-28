@@ -7,6 +7,7 @@ after editing policy or included files.
 ```sh
 cc-bash-guard explain "bash -c 'git status'"
 cc-bash-guard explain --format json "git push --force origin main"
+cc-bash-guard explain --why-not allow "git status > /tmp/out"
 ```
 
 ## What To Look For
@@ -24,6 +25,60 @@ cc-bash-guard explain --format json "git push --force origin main"
 `abstain` means "no matching rule" or "no opinion" for one permission source.
 The final hook output never remains `abstain`: if cc-bash-guard policy and
 Claude settings both abstain, the final decision falls back to `ask`.
+
+## Targeted Why-Not Mode
+
+Use `--why-not allow|ask|deny` when you expected a specific outcome and want a
+direct explanation:
+
+```sh
+cc-bash-guard explain --why-not allow "git status > /tmp/out"
+cc-bash-guard explain --why-not deny "git push origin main"
+cc-bash-guard explain --format json --why-not allow "bash -c 'git status'"
+```
+
+Normal `explain` output is unchanged unless `--why-not` is passed. Why-not mode
+reports:
+
+- requested outcome
+- actual cc-bash-guard policy outcome
+- actual Claude settings outcome
+- actual final outcome
+- matched rule, if any
+- command shape, shape flags, parser, and semantic fields
+- concise reasons why the requested outcome did not happen
+- safe suggestions such as running `verify`, adding a rule with `suggest`, or
+  reviewing a higher-priority `deny` or `ask` rule
+
+The JSON output is shaped for agents:
+
+```json
+{
+  "command": "git diff",
+  "requested_outcome": "allow",
+  "actual": {
+    "policy": "abstain",
+    "claude_settings": "abstain",
+    "final": "ask"
+  },
+  "reasons": [
+    {
+      "kind": "no_policy_match",
+      "message": "cc-bash-guard policy abstained"
+    },
+    {
+      "kind": "fallback_ask",
+      "message": "all permission sources abstained; final fallback is ask"
+    }
+  ],
+  "suggestions": [
+    {
+      "kind": "add_policy_rule",
+      "message": "Use cc-bash-guard suggest to generate a starter rule"
+    }
+  ]
+}
+```
 
 ## Common Reads
 

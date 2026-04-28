@@ -1423,6 +1423,294 @@ test:
 	}
 }
 
+func TestRunExplainWhyNotAllAbstainExplainsFallbackAsk(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: git status
+      command:
+        name: git
+        semantic:
+          verb: status
+      test:
+        allow:
+          - "git status"
+        abstain:
+          - "unknown-tool foo"
+test:
+  - in: "git status"
+    decision: allow
+`)
+	verifyExplainConfig(t, home, cwd, cacheHome)
+
+	code, stdout, stderr := runExplainCLI(t, home, cwd, cacheHome, "unknown-tool foo", "--why-not", "allow")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, want := range []string{
+		"requested_outcome: allow",
+		"policy: abstain",
+		"claude_settings: abstain",
+		"final: ask",
+		"no_policy_match",
+		"fallback_ask",
+		"Use cc-bash-guard suggest",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("why-not output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunExplainWhyNotDenyOutranksAllow(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  deny:
+    - name: block force push
+      command:
+        name: git
+        semantic:
+          verb: push
+          force: true
+      test:
+        deny:
+          - "git push --force origin main"
+        abstain:
+          - "git status"
+  allow:
+    - name: allow force push
+      command:
+        name: git
+        semantic:
+          verb: push
+          force: true
+      test:
+        allow:
+          - "git push --force origin main"
+        abstain:
+          - "git status"
+test:
+  - in: "git push --force origin main"
+    decision: deny
+`)
+	verifyExplainConfig(t, home, cwd, cacheHome)
+
+	code, stdout, stderr := runExplainCLI(t, home, cwd, cacheHome, "git push --force origin main", "--why-not", "allow")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"final: deny", "name: block force push", "deny_outranks_allow"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("why-not output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunExplainWhyNotAskOutranksAllow(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  ask:
+    - name: ask before push
+      command:
+        name: git
+        semantic:
+          verb: push
+      test:
+        ask:
+          - "git push origin main"
+        abstain:
+          - "git status"
+  allow:
+    - name: allow push
+      command:
+        name: git
+        semantic:
+          verb: push
+      test:
+        allow:
+          - "git push origin main"
+        abstain:
+          - "git status"
+test:
+  - in: "git push origin main"
+    decision: ask
+`)
+	verifyExplainConfig(t, home, cwd, cacheHome)
+
+	code, stdout, stderr := runExplainCLI(t, home, cwd, cacheHome, "git push origin main", "--why-not", "allow")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"final: ask", "name: ask before push", "ask_outranks_allow"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("why-not output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunExplainWhyNotNoPolicyMatch(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  deny:
+    - name: deny force push
+      command:
+        name: git
+        semantic:
+          verb: push
+          force: true
+      test:
+        deny:
+          - "git push --force origin main"
+        abstain:
+          - "git status"
+test:
+  - in: "git push --force origin main"
+    decision: deny
+`)
+	verifyExplainConfig(t, home, cwd, cacheHome)
+
+	code, stdout, stderr := runExplainCLI(t, home, cwd, cacheHome, "git status", "--why-not", "deny")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"requested_outcome: deny", "no_policy_match", "no_deny_match"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("why-not output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunExplainWhyNotSemanticMismatch(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: git status only
+      command:
+        name: git
+        semantic:
+          verb: status
+      test:
+        allow:
+          - "git status"
+        abstain:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`)
+	verifyExplainConfig(t, home, cwd, cacheHome)
+
+	code, stdout, stderr := runExplainCLI(t, home, cwd, cacheHome, "git diff", "--why-not", "allow")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"parser: git", "verb: diff", "semantic_mismatch", "Compare the parsed semantic fields"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("why-not output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunExplainWhyNotUnsafeShellShapeNotAutoAllowed(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: git status
+      command:
+        name: git
+        semantic:
+          verb: status
+      test:
+        allow:
+          - "git status"
+        abstain:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`)
+	verifyExplainConfig(t, home, cwd, cacheHome)
+
+	code, stdout, stderr := runExplainCLI(t, home, cwd, cacheHome, "git status > /tmp/out", "--why-not", "allow")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"shape_flags:", "redirection", "unsafe_shell_shape", "unsafe for structured allow"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("why-not output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunExplainWhyNotJSONStable(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	writeUserConfig(t, home, `permission:
+  allow:
+    - name: git status
+      command:
+        name: git
+        semantic:
+          verb: status
+      test:
+        allow:
+          - "git status"
+        abstain:
+          - "git diff"
+test:
+  - in: "git status"
+    decision: allow
+`)
+	verifyExplainConfig(t, home, cwd, cacheHome)
+
+	code, stdout, stderr := runExplainCLI(t, home, cwd, cacheHome, "git diff", "--format", "json", "--why-not", "allow")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	var payload app.ExplainWhyNotResult
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("json error: %v stdout=%s", err, stdout)
+	}
+	if payload.Command != "git diff" || payload.RequestedOutcome != "allow" {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if payload.Actual.Policy != "abstain" || payload.Actual.Final != "ask" {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if len(payload.Reasons) == 0 || payload.Reasons[0].Kind != "no_policy_match" {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if payload.Parsed.Shape == "" || len(payload.Parsed.Segments) == 0 {
+		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestRunExplainWhyNotInvalidValueFails(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	code, stdout, stderr := runExplainCLI(t, home, cwd, cacheHome, "git status", "--why-not", "maybe")
+	if code == 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if !strings.Contains(stderr, "why-not must be one of allow, ask, deny") {
+		t.Fatalf("stderr=%s", stderr)
+	}
+}
+
 func runSuggestCLI(t *testing.T, command string, args ...string) (int, string, string) {
 	t.Helper()
 	allArgs := append([]string{"suggest"}, args...)

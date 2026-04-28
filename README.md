@@ -425,12 +425,18 @@ Use `explain` to inspect a command without executing it:
 ```sh
 cc-bash-guard explain "git push --force origin main"
 cc-bash-guard explain --format json "git status"
+cc-bash-guard explain --why-not allow "git status > /tmp/out"
 ```
 
 The output shows the parsed command, semantic fields, matched rule, rule source
 file, Claude settings contribution, and final merged decision. It uses the same
 verified artifact as the hook. See [`docs/user/EXPLAIN.md`](docs/user/EXPLAIN.md)
 for how to read the output.
+
+Use `--why-not allow|ask|deny` when you need a direct, agent-friendly diagnosis
+for a near miss. The output includes the requested outcome, actual policy,
+Claude settings, final outcomes, parsed shape, semantic fields, concise reasons,
+and safe suggestions.
 
 Use `suggest` to generate a pasteable starter rule without executing the command
 or mutating config:

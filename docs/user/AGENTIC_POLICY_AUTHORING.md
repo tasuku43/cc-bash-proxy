@@ -111,6 +111,20 @@ The output shows the parsed command, semantic fields such as `verb` and
 the final merged decision. If no rule matches and Claude settings also abstain,
 the final fallback is `ask`.
 
+For agentic repair loops, ask the targeted question directly:
+
+```sh
+cc-bash-guard explain --why-not allow "git status > /tmp/out"
+cc-bash-guard explain --format json --why-not deny "git push origin main"
+```
+
+Why-not mode keeps the normal permission semantics unchanged, but returns a
+compact diagnosis with the requested outcome, actual policy and Claude settings
+outcomes, final outcome, matched rule if any, parsed shape and semantic fields,
+reason kinds, and safe suggestions. Useful reason kinds include
+`no_policy_match`, `fallback_ask`, `ask_outranks_allow`,
+`deny_outranks_allow`, `semantic_mismatch`, and `unsafe_shell_shape`.
+
 ## Fix A Failed Test
 
 Suppose you expected force push to be denied:

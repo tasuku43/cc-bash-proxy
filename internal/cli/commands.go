@@ -53,6 +53,7 @@ func runExplain(args []string, streams Streams, env Env) int {
 		return exitAllow
 	}
 	format := "text"
+	whyNot := ""
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -66,6 +67,15 @@ func runExplain(args []string, streams Streams, env Env) int {
 			i++
 		case strings.HasPrefix(arg, "--format="):
 			format = strings.TrimPrefix(arg, "--format=")
+		case arg == "--why-not":
+			if i+1 >= len(args) {
+				writeCommandHelp(streams.Stderr, "explain")
+				return exitError
+			}
+			whyNot = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "--why-not="):
+			whyNot = strings.TrimPrefix(arg, "--why-not=")
 		default:
 			rest = append(rest, arg)
 		}
@@ -75,11 +85,31 @@ func runExplain(args []string, streams Streams, env Env) int {
 		writeCommandHelp(streams.Stderr, "explain")
 		return exitError
 	}
+	if whyNot != "" && whyNot != "allow" && whyNot != "ask" && whyNot != "deny" {
+		writeErr(streams.Stderr, "why-not must be one of allow, ask, deny")
+		writeCommandHelp(streams.Stderr, "explain")
+		return exitError
+	}
 	if len(rest) == 0 {
 		writeCommandHelp(streams.Stderr, "explain")
 		return exitError
 	}
 	command := strings.Join(rest, " ")
+	if whyNot != "" {
+		result, err := app.RunExplainWhyNot(command, whyNot, env)
+		if format == "json" {
+			if encErr := writeIndentedJSON(streams.Stdout, result); encErr != nil {
+				writeErr(streams.Stderr, encErr.Error())
+				return exitError
+			}
+		} else {
+			writeExplainWhyNotText(streams.Stdout, result)
+		}
+		if err != nil || hasWhyNotParseError(result) {
+			return exitError
+		}
+		return exitAllow
+	}
 	result, err := app.RunExplain(command, env)
 	if format == "json" {
 		if encErr := writeIndentedJSON(streams.Stdout, result); encErr != nil {
@@ -419,6 +449,65 @@ func writeExplainText(w io.Writer, result app.ExplainResult) {
 	writeLine(w, "Final decision:")
 	writeLine(w, "  outcome: "+result.Final.Outcome)
 	writeLine(w, "  reason: "+result.Final.Reason)
+}
+
+func writeExplainWhyNotText(w io.Writer, result app.ExplainWhyNotResult) {
+	writeLine(w, "Command:")
+	writeLine(w, "  "+result.Command)
+	writeLine(w, "")
+	writeLine(w, "Why not:")
+	writeLine(w, "  requested_outcome: "+result.RequestedOutcome)
+	writeLine(w, "")
+	writeLine(w, "Actual:")
+	writeLine(w, "  policy: "+result.Actual.Policy)
+	writeLine(w, "  claude_settings: "+result.Actual.ClaudeSettings)
+	writeLine(w, "  final: "+result.Actual.Final)
+	writeLine(w, "")
+	writeLine(w, "Matched rule:")
+	writeMatchedRule(w, result.MatchedRule)
+	writeLine(w, "")
+	writeLine(w, "Parsed:")
+	writeLine(w, "  shape: "+result.Parsed.Shape)
+	if len(result.Parsed.ShapeFlags) > 0 {
+		writeLine(w, "  shape_flags: "+strings.Join(result.Parsed.ShapeFlags, ", "))
+	}
+	if len(result.Parsed.Diagnostics) > 0 {
+		writeLine(w, "  diagnostics:")
+		for _, diagnostic := range result.Parsed.Diagnostics {
+			writeLine(w, "    - "+diagnostic)
+		}
+	}
+	if result.Parsed.EvaluatedInner != nil {
+		writeLine(w, "  evaluated inner command:")
+		writeExplainSegment(w, *result.Parsed.EvaluatedInner, "    ")
+	} else {
+		writeLine(w, "  segments:")
+		for _, segment := range result.Parsed.Segments {
+			writeLine(w, "    - command.name: "+segment.CommandName)
+			writeExplainSegmentFields(w, segment, "      ")
+		}
+	}
+	writeLine(w, "")
+	writeLine(w, "Reasons:")
+	for _, reason := range result.Reasons {
+		writeLine(w, "  - "+reason.Kind+": "+reason.Message)
+	}
+	if len(result.Suggestions) > 0 {
+		writeLine(w, "")
+		writeLine(w, "Suggestions:")
+		for _, suggestion := range result.Suggestions {
+			writeLine(w, "  - "+suggestion.Kind+": "+suggestion.Message)
+		}
+	}
+}
+
+func hasWhyNotParseError(result app.ExplainWhyNotResult) bool {
+	for _, diagnostic := range result.Parsed.Diagnostics {
+		if strings.TrimSpace(diagnostic) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func writeExplainSegment(w io.Writer, segment app.ExplainSegment, prefix string) {
