@@ -35,9 +35,10 @@ func TestSecurityDocsHavePrivateReportingPath(t *testing.T) {
 	body := readProjectFile(t, "SECURITY.md")
 	required := []string{
 		"Please do not open public issues for unpatched vulnerabilities.",
-		"GitHub private vulnerability reporting is currently not enabled",
-		"TODO: enable GitHub private vulnerability reporting",
-		"private maintainer contact address",
+		"Use GitHub private vulnerability reporting for this repository:",
+		"https://github.com/tasuku43/cc-bash-guard/security/advisories/new",
+		"Reports through this channel are visible only to repository maintainers",
+		"coordinated disclosure",
 	}
 	for _, want := range required {
 		if !strings.Contains(body, want) {
