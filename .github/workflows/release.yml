@@ -44,6 +44,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify generated release checksums
+        run: |
+          cd dist
+          sha256sum -c checksums.txt
+
       - name: Generate provenance attestations for release archives
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4
         with:
