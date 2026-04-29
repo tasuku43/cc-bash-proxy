@@ -581,6 +581,11 @@ incompatible. The hook does not regenerate artifacts during hook execution; run
 `cc-bash-guard verify` explicitly after policy, include, or Claude settings
 changes.
 
+To avoid setup deadlocks, the hook lets safe, single-command
+`cc-bash-guard ...` invocations such as `cc-bash-guard verify` run without
+loading the verified artifact. Compound shell commands, redirects, pipelines,
+subshells, and other unsafe shell shapes are not bypassed.
+
 Hook decisions are returned as Claude Code `PreToolUse` JSON on stdout:
 
 ```json

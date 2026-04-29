@@ -251,6 +251,9 @@ Note:
   while authoring policy instead. The hook fails closed when verified artifacts
   are missing or stale. Run cc-bash-guard verify explicitly after policy or
   settings changes.
+  Safe single-command cc-bash-guard invocations, including cc-bash-guard verify,
+  bypass hook policy to avoid setup deadlocks. Compound commands, redirects, and
+  pipelines do not bypass policy.
 
 Hook protocol:
   The hook prints Claude Code PreToolUse JSON to stdout and exits 0 when that

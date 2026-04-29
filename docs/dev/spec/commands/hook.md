@@ -13,20 +13,29 @@ stdout.
 Runtime flow:
 
 1. parse Claude Code `PreToolUse` Bash payload
-2. load the verified effective policy artifact
-3. parse the original command string into a `CommandPlan`
-4. evaluate `cc-bash-guard` permission policy
-5. merge `cc-bash-guard` policy with Claude settings as permission sources
+2. allow safe, single-command `cc-bash-guard ...` invocations without loading
+   the verified artifact, so setup commands such as `cc-bash-guard verify` do
+   not deadlock while the hook is installed
+3. load the verified effective policy artifact
+4. parse the original command string into a `CommandPlan`
+5. evaluate `cc-bash-guard` permission policy
+6. merge `cc-bash-guard` policy with Claude settings as permission sources
    using `deny > ask > allow > abstain`
-6. when `--rtk` is enabled and the merged decision is not `deny`, invoke
+7. when `--rtk` is enabled and the merged decision is not `deny`, invoke
    external `rtk rewrite` once and emit `updatedInput` only when RTK returns a
    different command. For Claude Code Bash payloads, `updatedInput` preserves
    the original `tool_input` object and replaces only `command`
-7. emit Claude Code `PreToolUse` hook JSON for `allow`, `ask`, `deny`, or
+8. emit Claude Code `PreToolUse` hook JSON for `allow`, `ask`, `deny`, or
    fail-closed error output
 
 `abstain` means a source had no matching rule. The final fallback is `ask` only
 when all sources abstain.
+
+The self-command bypass applies only when the shell input is a safe single
+command and the resolved program name is `cc-bash-guard`. Compound commands,
+redirects, pipelines, subshells, command substitutions, background execution,
+and unknown shell shapes continue through normal policy evaluation and fail
+closed when the verified artifact is unavailable.
 
 `cc-bash-guard` does not emit `updatedInput.command` for policy evaluation.
 Parser-backed normalization is evaluation-only. The default hook does not emit

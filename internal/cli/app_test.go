@@ -274,6 +274,41 @@ test:
 	}
 }
 
+func TestRunHookClaudeAllowsSelfCommandWhenArtifactMissing(t *testing.T) {
+	payload := runClaudeHookMapTest(t, hookEnvSpec{
+		Command:    "cc-bash-guard verify",
+		SkipVerify: true,
+	})
+
+	hookOut := payload["hookSpecificOutput"].(map[string]any)
+	if hookOut["permissionDecision"] != "allow" {
+		t.Fatalf("permissionDecision = %v, payload=%+v", hookOut["permissionDecision"], payload)
+	}
+	if got := hookOut["permissionDecisionReason"]; got != "cc-bash-guard self command bypasses hook policy" {
+		t.Fatalf("permissionDecisionReason = %v", got)
+	}
+	diagnostic := payload["cc-bash-guard"].(map[string]any)
+	if !traceHasEffect(diagnostic["trace"], "self-command", "allow") {
+		t.Fatalf("trace missing self-command allow: %+v", diagnostic["trace"])
+	}
+}
+
+func TestRunHookClaudeDoesNotBypassCompoundSelfCommand(t *testing.T) {
+	payload := runClaudeHookMapTest(t, hookEnvSpec{
+		Command:    "cc-bash-guard verify && git status",
+		SkipVerify: true,
+	})
+
+	hookOut := payload["hookSpecificOutput"].(map[string]any)
+	if hookOut["permissionDecision"] != "deny" {
+		t.Fatalf("permissionDecision = %v, payload=%+v", hookOut["permissionDecision"], payload)
+	}
+	reason, _ := hookOut["permissionDecisionReason"].(string)
+	if !strings.Contains(reason, "verified artifact missing or stale") {
+		t.Fatalf("reason = %q", reason)
+	}
+}
+
 func TestRunHookClaudeAskReturnsAsk(t *testing.T) {
 	home := t.TempDir()
 	writeUserConfig(t, home, `permission:

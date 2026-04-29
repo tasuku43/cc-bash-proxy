@@ -6,6 +6,8 @@ import (
 
 	"github.com/tasuku43/cc-bash-guard/internal/adapter/claude"
 	"github.com/tasuku43/cc-bash-guard/internal/adapter/hookinput"
+	commandpkg "github.com/tasuku43/cc-bash-guard/internal/domain/command"
+	"github.com/tasuku43/cc-bash-guard/internal/domain/invocation"
 	"github.com/tasuku43/cc-bash-guard/internal/domain/policy"
 	"github.com/tasuku43/cc-bash-guard/internal/infra"
 )
@@ -14,6 +16,10 @@ func RunHook(raw []byte, opts HookOptions, env Env) HookResult {
 	req, err := hookinput.Normalize(raw)
 	if err != nil {
 		return HookResult{Payload: hookErrorPayload(claude.Tool, "invalid_input", err.Error())}
+	}
+
+	if isSelfCommand(req.Command) {
+		return HookResult{Payload: hookPayload(selfCommandDecision(req.Command), req)}
 	}
 
 	_, decision, err := EvaluateForCommand(req.Command, env)
@@ -30,6 +36,30 @@ func RunHook(raw []byte, opts HookOptions, env Env) HookResult {
 func evaluateDecision(req hookinput.ExecRequest, env Env) (policy.Decision, error) {
 	_, decision, err := EvaluateForCommand(req.Command, env)
 	return decision, err
+}
+
+func isSelfCommand(command string) bool {
+	if invocation.Classify(command) == invocation.CommandClassUnsafeCompound {
+		return false
+	}
+	parsed := commandpkg.NewInvocation(command)
+	return parsed.Program == "cc-bash-guard"
+}
+
+func selfCommandDecision(command string) policy.Decision {
+	return policy.Decision{
+		Command:  command,
+		Outcome:  "allow",
+		Explicit: true,
+		Reason:   "cc-bash-guard self command bypasses hook policy",
+		Message:  "cc-bash-guard self command bypasses hook policy",
+		Trace: []policy.TraceStep{{
+			Action: "bypass",
+			Name:   "self-command",
+			Effect: "allow",
+			Reason: "cc-bash-guard self command bypasses hook policy",
+		}},
+	}
 }
 
 func shouldAttemptImplicitVerify(errs []error) bool {
