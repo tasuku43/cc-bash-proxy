@@ -1099,6 +1099,51 @@ func TestLoadEffectiveForHookToolRejectsChangedIncludedFile(t *testing.T) {
 	if !strings.Contains(loaded.Errors[0].Error(), "changed since last verify") {
 		t.Fatalf("unexpected error: %v", loaded.Errors[0])
 	}
+	if !strings.Contains(loaded.Errors[0].Error(), "config changed: user:"+includePath) {
+		t.Fatalf("expected changed config fingerprint input, got: %v", loaded.Errors[0])
+	}
+	if !strings.Contains(loaded.Errors[0].Error(), "binary build info") {
+		t.Fatalf("expected binary build info hint, got: %v", loaded.Errors[0])
+	}
+}
+
+func TestVerifyEffectiveStoresFingerprintInputs(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	cacheHome := t.TempDir()
+	configPath := filepath.Join(home, ".config", "cc-bash-guard", "cc-bash-guard.yml")
+	writeFile(t, configPath, `permission:
+  allow:
+    - command:
+        name: git
+        semantic:
+          verb: status
+      test:
+        allow: ["git status"]
+        abstain: ["git diff"]
+`)
+	if _, err := VerifyEffectiveToAllCaches(cwd, home, "", cacheHome, "claude", "vtest"); err != nil {
+		t.Fatalf("VerifyEffectiveToAllCaches() error = %v", err)
+	}
+	data, err := os.ReadFile(singleCachePath(t, filepath.Join(cacheHome, "cc-bash-guard")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cache struct {
+		FingerprintInputs []FingerprintInput `json:"fingerprint_inputs"`
+	}
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []FingerprintInput{
+		{Kind: "tool", Name: "tool", Value: "claude"},
+		{Kind: "config", Name: "user:" + configPath},
+		{Kind: "binary", Name: "vcs.modified"},
+	} {
+		if !hasFingerprintInput(cache.FingerprintInputs, want) {
+			t.Fatalf("missing fingerprint input %+v in %+v", want, cache.FingerprintInputs)
+		}
+	}
 }
 
 func TestLoadEffectiveForHookToolRejectsMismatchedEvaluationSemantics(t *testing.T) {
@@ -1509,6 +1554,18 @@ func singleCachePath(t *testing.T, dir string) string {
 		t.Fatalf("files = %v", files)
 	}
 	return filepath.Join(dir, files[0].Name())
+}
+
+func hasFingerprintInput(inputs []FingerprintInput, want FingerprintInput) bool {
+	for _, input := range inputs {
+		if input.Kind != want.Kind || input.Name != want.Name {
+			continue
+		}
+		if want.Value == "" || input.Value == want.Value {
+			return true
+		}
+	}
+	return false
 }
 
 func writeFile(t *testing.T, path string, body string) {

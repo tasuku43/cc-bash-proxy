@@ -133,7 +133,7 @@ func loadVerifiedPipelineForEvaluation(env Env) (configrepo.Loaded, error) {
 		return loaded, nil
 	}
 	if shouldAttemptImplicitVerify(loaded.Errors) {
-		return loaded, errors.New("verified artifact missing or stale; run cc-bash-guard verify")
+		return loaded, errors.New("verified artifact missing or stale: " + strings.Join(policy.ErrorStrings(loaded.Errors), "; "))
 	}
 	if len(loaded.Errors) > 0 {
 		return loaded, errors.New(strings.Join(policy.ErrorStrings(loaded.Errors), "; "))

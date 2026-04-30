@@ -16,6 +16,7 @@ import (
 	"github.com/tasuku43/cc-bash-guard/internal/adapter/claude"
 	"github.com/tasuku43/cc-bash-guard/internal/domain/policy"
 	semanticpkg "github.com/tasuku43/cc-bash-guard/internal/domain/semantic"
+	"github.com/tasuku43/cc-bash-guard/internal/infra/buildinfo"
 	"gopkg.in/yaml.v3"
 )
 
@@ -43,6 +44,7 @@ type evalCacheFile struct {
 	SourcePaths                []string            `json:"source_paths,omitempty"`
 	SettingsPaths              []string            `json:"settings_paths,omitempty"`
 	CmdproxyVersion            string              `json:"cmdproxy_version,omitempty"`
+	FingerprintInputs          []FingerprintInput  `json:"fingerprint_inputs,omitempty"`
 	EvaluationSemanticsVersion int                 `json:"evaluation_semantics_version"`
 	VerifiedAt                 string              `json:"verified_at,omitempty"`
 	Pipeline                   policy.PipelineSpec `json:"pipeline"`
@@ -53,6 +55,12 @@ type EffectiveArtifactStatus struct {
 	Compatible bool
 	Path       string
 	Message    string
+}
+
+type FingerprintInput struct {
+	Kind  string `json:"kind"`
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 func ConfigPaths(home string, xdgConfigHome string) []Source {
@@ -71,6 +79,7 @@ type EffectiveInputs struct {
 	ConfigSources []Source
 	ConfigFiles   []Source
 	SettingsPaths []string
+	Inputs        []FingerprintInput
 	Fingerprint   string
 }
 
@@ -78,12 +87,14 @@ func ResolveEffectiveInputs(cwd string, home string, xdgConfigHome string, tool 
 	configSources := configSources(cwd, home, xdgConfigHome, tool)
 	settingsPaths := existingPaths(settingsPaths(tool, cwd, home))
 	configFiles := configDependencySources(configSources)
-	fingerprint := effectiveFingerprint(tool, configFiles, settingsPaths)
+	fingerprintInputs := EffectiveFingerprintInputs(tool, configFiles, settingsPaths)
+	fingerprint := effectiveFingerprint(fingerprintInputs)
 	return EffectiveInputs{
 		Tool:          tool,
 		ConfigSources: configSources,
 		ConfigFiles:   configFiles,
 		SettingsPaths: settingsPaths,
+		Inputs:        fingerprintInputs,
 		Fingerprint:   fingerprint,
 	}
 }
@@ -236,6 +247,7 @@ func VerifyEffectiveToAllCaches(cwd string, home string, xdgConfigHome string, x
 		SourcePaths:                sourcePaths(inputs.ConfigFiles),
 		SettingsPaths:              inputs.SettingsPaths,
 		CmdproxyVersion:            cmdproxyVersion,
+		FingerprintInputs:          inputs.Inputs,
 		EvaluationSemanticsVersion: EvaluationSemanticsVersion,
 		VerifiedAt:                 time.Now().UTC().Format(time.RFC3339),
 		Pipeline:                   pipeline.PipelineSpec,
@@ -361,7 +373,10 @@ func loadVerifiedEffectivePipeline(inputs EffectiveInputs, cacheDirs []string) (
 			return pipeline, nil
 		}
 	}
-	return policy.Pipeline{}, fmt.Errorf("effective config for %s changed since last verify; verified artifact not found in %s; run cc-bash-guard verify. Included policy files are part of the verified artifact.", inputs.Tool, strings.Join(cacheDirs, ", "))
+	if explanation := explainEffectiveFingerprintChange(inputs, cacheDirs); explanation != "" {
+		return policy.Pipeline{}, fmt.Errorf("effective config for %s changed since last verify (%s); verified artifact not found in %s; run cc-bash-guard verify. Included policy files, Claude permission settings, and binary build info are part of the verified artifact fingerprint.", inputs.Tool, explanation, strings.Join(cacheDirs, ", "))
+	}
+	return policy.Pipeline{}, fmt.Errorf("effective config for %s changed since last verify; verified artifact not found in %s; run cc-bash-guard verify. Included policy files, Claude permission settings, and binary build info are part of the verified artifact fingerprint.", inputs.Tool, strings.Join(cacheDirs, ", "))
 }
 
 func decodeFile(src Source, data string) (File, error) {
@@ -777,6 +792,90 @@ func loadEffectiveEvalCache(cachePath string, inputs EffectiveInputs) (policy.Pi
 	return policy.NewPipeline(cache.Pipeline, loadOnceSource(inputs)), true, nil
 }
 
+func explainEffectiveFingerprintChange(inputs EffectiveInputs, cacheDirs []string) string {
+	cache, ok := latestEffectiveCache(inputs.Tool, cacheDirs)
+	if !ok {
+		return ""
+	}
+	if len(cache.FingerprintInputs) == 0 {
+		if cache.Fingerprint != "" && cache.Fingerprint != inputs.Fingerprint {
+			return "fingerprint changed"
+		}
+		return ""
+	}
+	return firstFingerprintInputDiff(cache.FingerprintInputs, inputs.Inputs)
+}
+
+func latestEffectiveCache(tool string, cacheDirs []string) (evalCacheFile, bool) {
+	var best evalCacheFile
+	var bestTime time.Time
+	found := false
+	for _, cacheDir := range cacheDirs {
+		entries, err := os.ReadDir(cacheDir)
+		if err != nil {
+			continue
+		}
+		prefix := "compiled-" + tool + "-"
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			data, err := readTrustedCacheFile(filepath.Join(cacheDir, entry.Name()))
+			if err != nil {
+				continue
+			}
+			var cache evalCacheFile
+			if err := json.Unmarshal(data, &cache); err != nil || cache.Version != 2 || cache.Tool != tool {
+				continue
+			}
+			verifiedAt, err := time.Parse(time.RFC3339, cache.VerifiedAt)
+			if err != nil {
+				verifiedAt = time.Time{}
+			}
+			if !found || verifiedAt.After(bestTime) {
+				best = cache
+				bestTime = verifiedAt
+				found = true
+			}
+		}
+	}
+	return best, found
+}
+
+func firstFingerprintInputDiff(oldInputs []FingerprintInput, newInputs []FingerprintInput) string {
+	oldByKey := fingerprintInputsByKey(oldInputs)
+	newByKey := fingerprintInputsByKey(newInputs)
+	for _, input := range newInputs {
+		key := fingerprintInputKey(input)
+		old, ok := oldByKey[key]
+		if !ok {
+			return input.Kind + " added: " + input.Name
+		}
+		if old.Value != input.Value {
+			return input.Kind + " changed: " + input.Name + " " + old.Value + " -> " + input.Value
+		}
+	}
+	for _, input := range oldInputs {
+		key := fingerprintInputKey(input)
+		if _, ok := newByKey[key]; !ok {
+			return input.Kind + " removed: " + input.Name
+		}
+	}
+	return ""
+}
+
+func fingerprintInputsByKey(inputs []FingerprintInput) map[string]FingerprintInput {
+	byKey := make(map[string]FingerprintInput, len(inputs))
+	for _, input := range inputs {
+		byKey[fingerprintInputKey(input)] = input
+	}
+	return byKey
+}
+
+func fingerprintInputKey(input FingerprintInput) string {
+	return input.Kind + "\x00" + input.Name
+}
+
 func incompatibleEvaluationSemanticsError(cachePath string, got int) error {
 	return fmt.Errorf("verified artifact %s is incompatible: evaluation semantics version %d, current %d; run cc-bash-guard verify", cachePath, got, EvaluationSemanticsVersion)
 }
@@ -1126,26 +1225,46 @@ func configCandidates(dir string) []string {
 	return candidates
 }
 
-func effectiveFingerprint(tool string, sources []Source, settingsPaths []string) string {
-	h := sha256.New()
-	_, _ = h.Write([]byte("tool=" + tool + "\n"))
+func EffectiveFingerprintInputs(tool string, sources []Source, settingsPaths []string) []FingerprintInput {
+	inputs := []FingerprintInput{{Kind: "tool", Name: "tool", Value: tool}}
 	for _, src := range sources {
-		_, _ = h.Write([]byte(src.Layer + ":" + src.Path + "\n"))
-		if data, err := os.ReadFile(src.Path); err == nil {
-			_, _ = h.Write(data)
-		}
-		_, _ = h.Write([]byte("\n"))
+		inputs = append(inputs, FingerprintInput{Kind: "config", Name: src.Layer + ":" + src.Path, Value: fileContentHash(src.Path)})
 	}
 	for _, path := range settingsPaths {
-		_, _ = h.Write([]byte("settings:" + path + "\n"))
+		value := fileContentHash(path)
 		if tool == claude.Tool {
-			_, _ = h.Write(claude.SettingsFingerprintData(path))
-		} else if data, err := os.ReadFile(path); err == nil {
-			_, _ = h.Write(data)
+			value = shortHash(string(claude.SettingsFingerprintData(path)))
 		}
-		_, _ = h.Write([]byte("\n"))
+		inputs = append(inputs, FingerprintInput{Kind: "settings", Name: path, Value: value})
+	}
+	info := buildinfo.Read()
+	inputs = append(inputs,
+		FingerprintInput{Kind: "binary", Name: "version", Value: info.Version},
+		FingerprintInput{Kind: "binary", Name: "module", Value: info.Module},
+		FingerprintInput{Kind: "binary", Name: "go_version", Value: info.GoVersion},
+		FingerprintInput{Kind: "binary", Name: "vcs.revision", Value: info.VCSRevision},
+		FingerprintInput{Kind: "binary", Name: "vcs.time", Value: info.VCSTime},
+		FingerprintInput{Kind: "binary", Name: "vcs.modified", Value: info.VCSModified},
+		FingerprintInput{Kind: "binary", Name: "build_date", Value: info.BuildDate},
+	)
+	return inputs
+}
+
+func effectiveFingerprint(inputs []FingerprintInput) string {
+	h := sha256.New()
+	for _, input := range inputs {
+		_, _ = h.Write([]byte(input.Kind + ":" + input.Name + "=" + input.Value + "\n"))
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func fileContentHash(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 func configSourcesHash(sources []Source) string {

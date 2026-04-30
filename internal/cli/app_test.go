@@ -1275,7 +1275,7 @@ test:
 		t.Fatalf("payload = %+v", payload)
 	}
 	reason, _ := hookOut["permissionDecisionReason"].(string)
-	if !strings.Contains(reason, "verified artifact missing or stale; run cc-bash-guard verify") {
+	if !strings.Contains(reason, "verified artifact missing or stale") || !strings.Contains(reason, "run cc-bash-guard verify") {
 		t.Fatalf("reason = %q", reason)
 	}
 }
@@ -1341,7 +1341,7 @@ test:
 		t.Fatalf("payload = %+v", payload)
 	}
 	reason, _ := hookOut["permissionDecisionReason"].(string)
-	if !strings.Contains(reason, "verified artifact missing or stale; run cc-bash-guard verify") {
+	if !strings.Contains(reason, "verified artifact missing or stale") || !strings.Contains(reason, "run cc-bash-guard verify") {
 		t.Fatalf("reason = %q", reason)
 	}
 }
