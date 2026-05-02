@@ -191,6 +191,139 @@ func TestCompositionExplicitAskBeatsClaudeSettingsPerCommandAllow(t *testing.T) 
 	}
 }
 
+func TestCompositionPolicyAllowWithToleratedPipelineRedirectSurvivesClaudeAbstain(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), claudeSettingsJSON(nil, nil, nil))
+
+	p := policy.NewPipeline(policy.PipelineSpec{
+		Permission: policy.PermissionSpec{
+			ToleratedRedirects: policy.ToleratedRedirectsSpec{Only: []string{"stderr_to_devnull"}},
+			Allow: []policy.PermissionRuleSpec{
+				{Command: policy.PermissionCommandSpec{Name: "find"}},
+				{Command: policy.PermissionCommandSpec{Name: "xargs"}},
+			},
+		},
+	}, policy.Source{})
+
+	base, err := policy.Evaluate(p, `find . -type f -name "*.php" | xargs grep -l "class SpamFilter" 2>/dev/null`)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if base.Outcome != "allow" {
+		t.Fatalf("base Outcome = %q, want allow before Claude bridge; decision=%+v", base.Outcome, base)
+	}
+
+	decision := ApplyPermissionBridge(Tool, base, cwd, home)
+	if decision.Outcome != "allow" {
+		t.Fatalf("Outcome = %q, want allow; decision=%+v", decision.Outcome, decision)
+	}
+	if got := compositionCommandEffects(decision.Trace); !equalStrings(got, []string{"allow", "allow"}) {
+		t.Fatalf("composition.command effects=%#v, want both allow; trace=%+v", got, decision.Trace)
+	}
+	if !bridgeTraceContainsReason(decision.Trace, "permission_sources_merge", "source allowed") {
+		t.Fatalf("trace missing allowed merge; trace=%+v", decision.Trace)
+	}
+}
+
+func TestCompositionNonToleratedPipelineRedirectStillAsksWithClaudeAbstain(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), claudeSettingsJSON(nil, nil, nil))
+
+	p := policy.NewPipeline(policy.PipelineSpec{
+		Permission: policy.PermissionSpec{
+			ToleratedRedirects: policy.ToleratedRedirectsSpec{Only: []string{"stderr_to_devnull"}},
+			Allow: []policy.PermissionRuleSpec{
+				{Command: policy.PermissionCommandSpec{Name: "find"}},
+				{Command: policy.PermissionCommandSpec{Name: "xargs"}},
+			},
+		},
+	}, policy.Source{})
+
+	base, err := policy.Evaluate(p, `find . -type f -name "*.php" | xargs grep -l "class SpamFilter" >/tmp/out`)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if base.Outcome != "ask" {
+		t.Fatalf("base Outcome = %q, want ask before Claude bridge; decision=%+v", base.Outcome, base)
+	}
+
+	decision := ApplyPermissionBridge(Tool, base, cwd, home)
+	if decision.Outcome != "ask" {
+		t.Fatalf("Outcome = %q, want ask; decision=%+v", decision.Outcome, decision)
+	}
+	if !bridgeTraceContainsReason(decision.Trace, "permission_sources_merge", "source asked") {
+		t.Fatalf("trace missing asked merge; trace=%+v", decision.Trace)
+	}
+}
+
+func TestCompositionStreamMergeRedirectStillDeniesWithClaudeAbstain(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), claudeSettingsJSON(nil, nil, nil))
+
+	p := policy.NewPipeline(policy.PipelineSpec{
+		Permission: policy.PermissionSpec{
+			Allow: []policy.PermissionRuleSpec{
+				{Command: policy.PermissionCommandSpec{Name: "find"}},
+				{Command: policy.PermissionCommandSpec{Name: "xargs"}},
+			},
+		},
+	}, policy.Source{})
+
+	base, err := policy.Evaluate(p, `find . -type f -name "*.php" | xargs grep -l "class SpamFilter"`)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	base.Outcome = "deny"
+	base.Reason = "composition"
+	base.Command = `find . -type f -name "*.php" | xargs grep -l "class SpamFilter" 2>&1`
+	for i := range base.Trace {
+		if base.Trace[i].Name == "composition" {
+			base.Trace[i].Effect = "deny"
+			base.Trace[i].Reason = "redirect stream merge denied"
+			base.Trace[i].ShapeFlags = []string{"pipeline", "redirection", "redirect_stream_merge"}
+		}
+	}
+
+	decision := ApplyPermissionBridge(Tool, base, cwd, home)
+	if decision.Outcome != "deny" {
+		t.Fatalf("Outcome = %q, want deny; decision=%+v", decision.Outcome, decision)
+	}
+	if !bridgeTraceContainsReason(decision.Trace, "permission_sources_merge", "source denied") {
+		t.Fatalf("trace missing denied merge; trace=%+v", decision.Trace)
+	}
+}
+
+func TestCompositionToleratedPipelineRedirectAsksWhenSegmentLacksPolicyAllow(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), claudeSettingsJSON(nil, nil, nil))
+
+	p := policy.NewPipeline(policy.PipelineSpec{
+		Permission: policy.PermissionSpec{
+			ToleratedRedirects: policy.ToleratedRedirectsSpec{Only: []string{"stderr_to_devnull"}},
+			Allow: []policy.PermissionRuleSpec{
+				{Command: policy.PermissionCommandSpec{Name: "find"}},
+			},
+		},
+	}, policy.Source{})
+
+	base, err := policy.Evaluate(p, `find . -type f -name "*.php" | xargs grep -l "class SpamFilter" 2>/dev/null`)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+
+	decision := ApplyPermissionBridge(Tool, base, cwd, home)
+	if decision.Outcome != "ask" {
+		t.Fatalf("Outcome = %q, want ask; decision=%+v", decision.Outcome, decision)
+	}
+	if got := compositionCommandEffects(decision.Trace); !equalStrings(got, []string{"allow", "ask"}) {
+		t.Fatalf("composition.command effects=%#v, want allow then ask; trace=%+v", got, decision.Trace)
+	}
+}
+
 func claudeSettingsJSON(deny []string, ask []string, allow []string) string {
 	return `{"permissions":{"deny":` + bashPatternsJSON(deny) + `,"ask":` + bashPatternsJSON(ask) + `,"allow":` + bashPatternsJSON(allow) + `}}`
 }

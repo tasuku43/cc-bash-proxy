@@ -150,6 +150,9 @@ func mergeCompositionPermissionSources(decision policy.Decision, cwd string, hom
 	if claudeOutcome == "deny" || claudeOutcome == "ask" {
 		return policy.Decision{}, false
 	}
+	if strings.TrimSpace(decision.Outcome) == "deny" {
+		return policy.Decision{}, false
+	}
 
 	commandSteps := compositionCommandTraceIndexes(decision.Trace)
 	if len(commandSteps) == 0 {
@@ -199,7 +202,7 @@ func mergeCompositionPermissionSources(decision policy.Decision, cwd string, hom
 		decision.Reason = "composition"
 		updateCompositionFinalTrace(&decision, "ask", "command["+itoa(firstAsk)+"] asked", plan)
 		decision.Trace = append(decision.Trace, finalMergeTrace("ask", "source asked"))
-	case allAllowed && claudeCompositionAllows(plan.Shape):
+	case allAllowed && (claudeCompositionAllows(plan.Shape) || compositionPolicyAlreadyAllowed(decision)):
 		decision.Outcome = "allow"
 		decision.Explicit = true
 		decision.Reason = "composition"
@@ -213,6 +216,18 @@ func mergeCompositionPermissionSources(decision policy.Decision, cwd string, hom
 		decision.Trace = append(decision.Trace, finalMergeTrace("ask", "source asked"))
 	}
 	return decision, true
+}
+
+func compositionPolicyAlreadyAllowed(decision policy.Decision) bool {
+	if strings.TrimSpace(decision.Outcome) != "allow" {
+		return false
+	}
+	for _, step := range decision.Trace {
+		if step.Action == "permission" && step.Name == "composition" && step.Effect == "allow" {
+			return true
+		}
+	}
+	return false
 }
 
 func compositionCommandTraceIndexes(trace []policy.TraceStep) []int {
